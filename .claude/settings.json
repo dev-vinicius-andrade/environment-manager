@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo REPO RULES - before starting, read .claude/docs/README.md and .claude/instructions/README.md and check .claude/plans for existing docs or how-to instructions that support this task. After changes, decide if docs or instructions need adding or updating and keep the indexes current. All Claude artifacts live under .claude."
+          }
+        ]
+      }
+    ]
+  }
+}
