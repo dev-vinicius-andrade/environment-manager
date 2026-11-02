@@ -11,6 +11,8 @@ Add one line per file: `file — what it explains`.
 - `edit-hosts.md` — edit the hosts file locally and from a parent (`--allow-hosts`), safely with a temp file, elevation on Windows and Linux/macOS
 - `profiles-with-hosts.md` — define a profile with environment and hosts entries, apply env / hosts / both (`use --hosts`, `--only`, `hosts apply`), elevation notes, safe trial with temp files
 
+- `dotfiles.md` — set up the `links` manifest, clone/register a dotfiles repo, status/link/pull/unlink, Windows `--copy`, trying it with a temp home
+
 - `add-tui-screen.md` — how to add a screen (tab) to the TUI: `Screen` interface, registration, output contract, tests
 
 Difference from `.claude/docs/`: docs explain what exists and why; instructions explain how to do a task.

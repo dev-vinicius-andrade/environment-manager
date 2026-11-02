@@ -28,3 +28,7 @@ One machine (the **parent**) controls the profiles of other machines (its **chil
 
 - Running the hub/agent as a background service (today: foreground commands).
 - Fan-out commands across many children.
+
+## 3. Dotfiles
+
+The owner keeps a dotfiles repository (`E:\repos\github\dev-vinicius-andrade\dotfiles`) and wants envmgr to configure the machine from it: `envmgr dotfiles clone <source> <dest>`, `envmgr dotfiles link`... Implemented for the local machine (clone, register, status, link, unlink, pull; manifest in the repo's `.dotfiles.config.json`); see `dotfiles.md` and `../instructions/dotfiles.md`. Open: `adopt`, profiles choosing which links to apply, parent control of a child's dotfiles (behind an explicit grant).

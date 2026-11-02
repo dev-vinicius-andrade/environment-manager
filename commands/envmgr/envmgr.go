@@ -7,6 +7,7 @@ import (
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/agent"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/current"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/deactivate"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/dotfiles"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/follow"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/hook"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/hosts"
@@ -89,6 +90,7 @@ func (c *commandDefinition) defineSubCommands() {
 	join.CreateCommand(c.context, c.cmd)
 	agent.CreateCommand(c.context, c.cmd)
 	tui.CreateCommand(c.context, c.cmd)
+	dotfiles.CreateCommand(c.context, c.cmd)
 	hosts.CreateCommand(c.context, c.cmd)
 	selectcmd.CreateCommand(c.context, c.cmd)
 	selected.CreateCommand(c.context, c.cmd)
