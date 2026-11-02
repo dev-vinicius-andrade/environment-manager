@@ -6,5 +6,8 @@ Add one line per file: `file — what it explains`.
 
 - `add-subcommand.md` — how to add a cobra subcommand and wire it into the root
 - `e2e-demo.md` — run the two-machine end-to-end demo and negative checks
+- `connect-a-child.md` — connect a child machine to a parent (invite, join, operate, revoke, rotate)
+
+- `add-tui-screen.md` — how to add a screen (tab) to the TUI: `Screen` interface, registration, output contract, tests
 
 Difference from `.claude/docs/`: docs explain what exists and why; instructions explain how to do a task.

@@ -6,23 +6,23 @@ Named profiles of environment variables (`local`, `dev`, `external`, `test1`...)
 
 ## 2. Remote control between machines
 
-One machine should be able to control another (stated by the owner, details not yet defined). Candidate meanings, to be decided with the owner:
+One machine (the **parent**) controls the profiles of other machines (its **children**). Implemented; details in `remote.md`, steps in `../instructions/connect-a-child.md`.
 
-- Apply/switch a profile on a remote machine (remote `use`, `set`, `list`).
-- Manage the remote machine's hosts file and environment variables.
-- Sync profiles between machines (push/pull) without remote execution.
-- Run arbitrary commands remotely (largest scope, highest risk).
+### Decisions (owner)
 
-### Design constraints (security-sensitive)
+- **Hub model: the child dials the parent.** The parent runs `envmgr parent serve`; children make outbound HTTPS long-polls and expose no port, so it works behind NAT. One parent controls many children; each child has exactly one parent.
+- **Pairing is a one-time join code.** `envmgr parent invite` prints `envmgr join <code>`; the code is single-use, expires (default 15 min), carries the parent address and certificate fingerprint (pinned by the child), and is exchanged for a per-child credential. Revoke per child with `envmgr parent revoke`.
+- **Scope: profile operations only** (list/get/put/delete profile, set/unset variable), with optional read-only grant. No remote command execution, no shell, no arbitrary paths.
+- Transport: custom TLS 1.3 hub with certificate pinning (no CA, no SSH dependency). The earlier shared-token `serve`/`remote add` design was replaced entirely.
 
-- Needs explicit pairing/trust between machines and authenticated, encrypted transport; no unauthenticated listener.
-- Profiles contain secrets (keys, tokens): never transmit or store them in plain text without protection.
-- Prefer a narrow, allow-listed command set (profile/hosts operations) over generic remote execution.
-- Transport options to evaluate: SSH (reuse existing auth, no daemon of our own) vs. a custom agent/daemon with mTLS.
+### Design constraints (still apply)
+
+- Explicit pairing/trust and authenticated, encrypted transport; no unauthenticated mutation endpoint.
+- Profiles contain secrets: values travel only inside TLS, are masked in output by default, and raw invite secrets/credentials are never stored on the parent.
+- Narrow, allow-listed operations over generic remote execution.
 
 ### Open questions
 
-- Which of the candidate meanings above is the target for the first version?
-- Same network only, or across the internet / NAT?
-- One controller to many machines, or peer to peer?
-- Operating systems involved (Windows, Linux, both)?
+- Hosts-file management remotely (not in scope yet).
+- Running the hub/agent as a background service (today: foreground commands).
+- Fan-out commands across many children.

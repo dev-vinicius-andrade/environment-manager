@@ -1,16 +1,19 @@
 package envmgr
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/agent"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/current"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/deactivate"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/join"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/list"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/parent"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/profile"
-	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/remote"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/run"
-	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/serve"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/set"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/tui"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/unset"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/use"
 	"github.com/dev-vinicius-andrade/environment-manager/helpers"
@@ -75,12 +78,23 @@ func (c *commandDefinition) defineSubCommands() {
 	unset.CreateCommand(c.context, c.cmd)
 	run.CreateCommand(c.context, c.cmd)
 	profile.CreateCommand(c.context, c.cmd)
-	serve.CreateCommand(c.context, c.cmd)
-	remote.CreateCommand(c.context, c.cmd)
+	parent.CreateCommand(c.context, c.cmd)
+	join.CreateCommand(c.context, c.cmd)
+	agent.CreateCommand(c.context, c.cmd)
+	tui.CreateCommand(c.context, c.cmd)
 }
 
 func (c *commandDefinition) runCommand(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
+		// In a terminal, a bare "envmgr" opens the TUI (stdout may be captured
+		// by eval to activate a profile); otherwise print help.
+		if tui.ShouldLaunch() {
+			if err := tui.Run(cmd, ""); err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
+				os.Exit(1)
+			}
+			return
+		}
 		helpers.CobraHelper.ShowHelp(cmd, &types.CobraHelpOptions{Title: "envmgr"})
 		return
 	}

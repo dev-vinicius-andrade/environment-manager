@@ -17,13 +17,15 @@ CLI to manage the user's environment (hosts, environment variables). Intended co
 
 Design constraint for that feature: a child process cannot mutate its parent shell's environment, so activation must work by emitting shell code for the shell to evaluate (`eval "$(envmgr use dev)"` / `envmgr use dev | Invoke-Expression`), `direnv`-style, with deactivate restoring the previous values. Primary dev platform is Windows/PowerShell, so PowerShell output is a priority alongside bash/zsh/fish.
 
-Second goal: one machine controlling another. v1 is a narrow, token + pinned-TLS authenticated profile agent (`envmgr serve` / `envmgr remote`); see `.claude/docs/remote.md` and `.claude/docs/goals.md`. Remote command execution is deliberately out of scope.
+Second goal: one machine controlling another. Hub model: a **parent** (`envmgr parent serve`) issues a single-use, expiring join code (`parent invite`); a **child** runs `envmgr join <code>`, dials the parent over pinned TLS and stays bound to that one parent, which can run profile operations on it (revocable, optionally read-only). See `.claude/docs/remote.md` and `.claude/docs/goals.md`. Remote command execution is deliberately out of scope.
+
+The app is a terminal app with a TUI (`envmgr tui`, also bare `envmgr` in a terminal); it renders on stderr so stdout can carry activation shell code (`.claude/docs/tui.md`).
 
 ## Current state
 
-Implemented and tested: profiles (`use`, `deactivate`, `list`, `current`, `set`, `unset`, `run`, `profile show|delete`) with bash/zsh/fish/powershell/cmd emitters (`.claude/docs/profiles.md`), an on-disk store (`ENVMGR_HOME` overrides the dir), and the remote agent/client. Run `go test -buildvcs=false ./...`; manual walkthrough in `.claude/instructions/e2e-demo.md`.
+Implemented and tested: profiles (`use`, `deactivate`, `list`, `current`, `set`, `unset`, `run`, `profile show|delete`) with bash/zsh/fish/powershell/cmd emitters (`.claude/docs/profiles.md`), an on-disk store (`ENVMGR_HOME` overrides the dir), the parent/child remote model (`parent`, `join`, `agent`), and the profiles TUI. Run `go test -buildvcs=false ./...`; manual walkthrough in `.claude/instructions/e2e-demo.md`. The module needs Go 1.24+ (Charm libraries).
 
-Not done: hosts-file management; remote command execution (by design); the fish round trip never ran (fish not installed). `services/` is empty and `main.go` has a placeholder `var version`. `go vet` reports a pre-existing `signal.Notify` warning in `helpers/spinner.go`. `.bin/` holds stale committed `nioscli` linux binaries (the `.gitignore` is a Visual Studio template). `types/context.EnvContext` is an empty shared context.
+Not done: hosts-file management; remote command execution (by design); TUI screens for parent/children; running parent/child as background services; the fish round trip never ran (fish not installed). `services/` is empty and `main.go` has a placeholder `var version`. `go vet` reports a pre-existing `signal.Notify` warning in `helpers/spinner.go`. `.bin/` holds stale committed `nioscli` linux binaries (the `.gitignore` is a Visual Studio template). `types/context.EnvContext` is an empty shared context.
 
 ## Commands
 
@@ -36,7 +38,7 @@ Not done: hosts-file management; remote command execution (by design); the fish 
 
 - `main.go` calls `envmgr.CreateCommand()` (cobra root, package `commands/envmgr`) and exits 1 on error.
 - `commands/envmgr/envmgr.go`: root wrapper struct `commandDefinition` (cobra command + shared `*context.EnvContext`). Pattern: each subcommand package exposes `CreateCommand(ctx, parent)` and attaches itself; `defineSubCommands` wires them. See `.claude/instructions/add-subcommand.md`.
-- `internal/profile` (store, name validation), `internal/shell` (state + per-shell emitters), `internal/remote` (server, client, remotes.json). All commands follow the same `CreateCommand` pattern and are registered in `envmgr.go`.
+- `internal/profile` (store, name validation), `internal/shell` (state + per-shell emitters), `internal/remote` (hub, child agent loop, join codes, TLS pinning), `internal/tui` (Bubble Tea screens). All commands follow the same `CreateCommand` pattern and are registered in `envmgr.go`.
 - `helpers/` (`CobraHelper` colored help, os/spinner/util helpers), `types/` (shared types, enums, colors, context), `constants/`, `utils/`. `types/interfaces.CommandDefinition` is unused.
 
 ## Git
