@@ -216,6 +216,92 @@ func TestIcon(t *testing.T) {
 	}
 }
 
+// pixel returns the BGRA pixel (x, y from the top) of the size-px image of an icon.
+func pixel(t *testing.T, ico []byte, size, x, y int) (b, g, r, a byte) {
+	t.Helper()
+	le := binary.LittleEndian
+	for i := 0; i < int(le.Uint16(ico[4:])); i++ {
+		e := ico[6+16*i:]
+		if int(e[0]) != size {
+			continue
+		}
+		off := int(le.Uint32(e[12:])) + 40
+		row := size - 1 - y // bottom-up
+		p := ico[off+(row*size+x)*4:]
+		return p[0], p[1], p[2], p[3]
+	}
+	t.Fatalf("no %dpx image", size)
+	return
+}
+
+func TestIconMark(t *testing.T) {
+	type px struct{ x, y int }
+	// 32px image: left brace spine (6,16), right brace spine (26,12),
+	// upper chevron apex (16,10), lower chevron apex (16,22), corner (0,0).
+	leftBrace, rightBrace, up, down, corner := px{6, 12}, px{26, 12}, px{16, 10}, px{16, 22}, px{0, 0}
+	near := func(a, b byte) bool { d := int(a) - int(b); return d >= -12 && d <= 12 }
+	for _, tc := range []struct {
+		name          string
+		active, light bool
+		back, front   [3]byte // r, g, b of the olive side and the front side
+	}{
+		{"active dark", true, false, [3]byte{0xA6, 0xAB, 0x5B}, [3]byte{0xED, 0xED, 0xED}},
+		{"active light", true, true, [3]byte{0x7F, 0x85, 0x30}, [3]byte{0x2B, 0x2B, 0x2B}},
+		{"none dark", false, false, [3]byte{0x7A, 0x80, 0x8A}, [3]byte{0xB4, 0xB9, 0xC1}},
+		{"none light", false, true, [3]byte{0x9A, 0xA0, 0xA9}, [3]byte{0x6B, 0x70, 0x78}},
+	} {
+		ico := IconFor(tc.active, tc.light)
+		for _, size := range []int{16, 32} {
+			sc := func(p px) px { return px{p.x * size / 32, p.y * size / 32} }
+			minA := byte(200)
+			if size < 32 {
+				minA = 150 // strokes are about 2px wide: edge pixels are partly covered
+			}
+			_, _, _, ca := pixel(t, ico, size, sc(corner).x, sc(corner).y)
+			if ca != 0 {
+				t.Errorf("%s %dpx: corner not transparent (a=%d)", tc.name, size, ca)
+			}
+			for _, w := range []struct {
+				name string
+				p    px
+				want [3]byte
+			}{{"left brace", leftBrace, tc.back}, {"lower chevron", down, tc.back}} {
+				b, g, r, a := pixel(t, ico, size, sc(w.p).x, sc(w.p).y)
+				if a < minA || !near(r, w.want[0]) || !near(g, w.want[1]) || !near(b, w.want[2]) {
+					t.Errorf("%s %dpx %s: got rgba(%d,%d,%d,%d) want %v", tc.name, size, w.name, r, g, b, a, w.want)
+				}
+			}
+			for _, w := range []struct {
+				name string
+				p    px
+			}{{"right brace", rightBrace}, {"upper chevron", up}} {
+				b, g, r, a := pixel(t, ico, size, sc(w.p).x, sc(w.p).y)
+				if a < minA || !near(r, tc.front[0]) || !near(g, tc.front[1]) || !near(b, tc.front[2]) {
+					t.Errorf("%s %dpx %s: got rgba(%d,%d,%d,%d) want %v", tc.name, size, w.name, r, g, b, a, tc.front)
+				}
+			}
+		}
+	}
+	if bytes.Equal(IconFor(true, false), IconFor(true, true)) || bytes.Equal(IconFor(true, false), IconFor(false, false)) {
+		t.Fatal("icon variants are not distinct")
+	}
+}
+
+func TestLightTaskbarRefreshesIcon(t *testing.T) {
+	st := State{Profiles: []string{"a"}, Selected: "a", SelectedEnv: true}
+	dark, light := Build(st), Build(State{Profiles: st.Profiles, Selected: "a", SelectedEnv: true, LightTaskbar: true})
+	if !light.LightTaskbar || dark.LightTaskbar {
+		t.Fatal("LightTaskbar not carried into the model")
+	}
+	ch := Diff(dark, light)
+	if len(ch) != 1 || ch[0].What != "icon" {
+		t.Fatalf("theme change should refresh only the icon, got %v", ch)
+	}
+	if len(Diff(dark, dark)) != 0 {
+		t.Fatal("no change expected")
+	}
+}
+
 func TestHelpers(t *testing.T) {
 	a, b := MutexName(`C:\Users\X\envmgr`), MutexName(`c:\users\x\ENVMGR\`)
 	if a != b || !strings.HasPrefix(a, `Local\envmgr-tray-`) || a == MutexName(`C:\other`) {

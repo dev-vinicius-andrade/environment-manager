@@ -28,6 +28,7 @@ const (
 	createNewProcessGroup = 0x00000200
 	createNewConsole      = 0x00000010
 	runKeyPath            = `Software\Microsoft\Windows\CurrentVersion\Run`
+	personalizeKeyPath    = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
 )
 
 // Running reports whether a tray for home is already running.
@@ -140,7 +141,7 @@ func Run(o Options) error {
 }
 
 func (a *app) onReady() {
-	systray.SetIcon(Icon(false))
+	systray.SetIcon(IconFor(false, lightTaskbar()))
 	systray.SetTooltip("envmgr")
 	a.shown = map[*systray.MenuItem]bool{}
 	for i := range a.slots {
@@ -222,7 +223,7 @@ func (a *app) poll() {
 // readState reads the store, the selection and the autostart flag. Read
 // errors keep the previous values (a profile file being written, ...).
 func (a *app) readState(prev Model) State {
-	st := State{Autostart: autostartEnabled()}
+	st := State{Autostart: autostartEnabled(), LightTaskbar: lightTaskbar()}
 	names, err := a.opts.Store.List()
 	if err != nil {
 		a.log.Printf("list profiles: %v", err)
@@ -303,7 +304,7 @@ func (a *app) apply(m Model, changes []Change) {
 		case "tooltip":
 			systray.SetTooltip(m.Tooltip)
 		case "icon":
-			systray.SetIcon(Icon(m.HasSelection))
+			systray.SetIcon(IconFor(m.HasSelection, m.LightTaskbar))
 		}
 	}
 }
@@ -346,6 +347,18 @@ func (a *app) click(t Target) {
 		a.log.Printf("action failed: %v", err)
 	}
 	a.refresh(false)
+}
+
+// lightTaskbar reports whether the Windows taskbar (and its tray) uses the
+// light theme (HKCU Personalize SystemUsesLightTheme); false when unknown.
+func lightTaskbar() bool {
+	k, err := registry.OpenKey(registry.CURRENT_USER, personalizeKeyPath, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+	v, _, err := k.GetIntegerValue("SystemUsesLightTheme")
+	return err == nil && v == 1
 }
 
 func autostartEnabled() bool {

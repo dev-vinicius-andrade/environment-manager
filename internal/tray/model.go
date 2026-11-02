@@ -26,6 +26,7 @@ type State struct {
 	SelectedHosts bool     // the selection includes the hosts scope
 	HostsApplied  string   // profile whose hosts are applied (hosts-applied.json), "" = none
 	Autostart     bool     // "Start with Windows" is enabled
+	LightTaskbar  bool     // the Windows taskbar uses the light theme (icon colors)
 }
 
 // Slot is one profile entry in the menu (a fixed pool of MaxProfiles items
@@ -49,6 +50,7 @@ type Model struct {
 	Autostart    bool   // "Start with Windows" is checked
 	Tooltip      string // icon tooltip
 	HasSelection bool   // icon look: true = a profile is selected
+	LightTaskbar bool   // icon look: light taskbar theme
 }
 
 // Fixed menu item titles.
@@ -95,7 +97,7 @@ func Build(st State) Model {
 			}
 		}
 	}
-	m := Model{Autostart: st.Autostart, Empty: len(names) == 0}
+	m := Model{Autostart: st.Autostart, Empty: len(names) == 0, LightTaskbar: st.LightTaskbar}
 	for i, n := range shown {
 		sel := st.Selected != "" && n == st.Selected
 		m.Slots[i] = Slot{Visible: true, Profile: n, Checked: sel, Env: sel && st.SelectedEnv, Hosts: sel && st.SelectedHosts}
@@ -150,7 +152,7 @@ func Diff(prev, next Model) []Change {
 	add(prev.NoneChecked != next.NoneChecked, "none")
 	add(prev.Autostart != next.Autostart, "autostart")
 	add(prev.Tooltip != next.Tooltip, "tooltip")
-	add(prev.HasSelection != next.HasSelection, "icon")
+	add(prev.HasSelection != next.HasSelection || prev.LightTaskbar != next.LightTaskbar, "icon")
 	return out
 }
 
@@ -263,6 +265,6 @@ func (m Model) Summary() string {
 			}
 		}
 	}
-	return fmt.Sprintf("tooltip=%q profiles=%d checked=%q env=%v hosts=%v none=%v more=%q empty=%v autostart=%v icon_selected=%v",
-		m.Tooltip, visible, checked, env, hosts, m.NoneChecked, m.More, m.Empty, m.Autostart, m.HasSelection)
+	return fmt.Sprintf("tooltip=%q profiles=%d checked=%q env=%v hosts=%v none=%v more=%q empty=%v autostart=%v icon_selected=%v icon_light=%v",
+		m.Tooltip, visible, checked, env, hosts, m.NoneChecked, m.More, m.Empty, m.Autostart, m.HasSelection, m.LightTaskbar)
 }
