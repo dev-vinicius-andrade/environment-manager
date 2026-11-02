@@ -1,0 +1,22 @@
+# envmgr hook (zsh): follow the machine-wide profile selection (envmgr select / tray).
+__envmgr_exe='/opt/env mgr/envmgr'
+__envmgr_default_sel='/home/u/.config/envmgr/selected.json'
+__envmgr_hook() {
+  local __envmgr_ret=$?
+  if [ -z "${ENVMGR_PINNED:-}" ] || [ "${ENVMGR_PINNED}" = 0 ]; then
+    local __envmgr_f="${ENVMGR_HOME:+$ENVMGR_HOME/selected.json}"
+    __envmgr_f="${__envmgr_f:-$__envmgr_default_sel}"
+    local __envmgr_cur=""
+    if [ -f "$__envmgr_f" ]; then
+      { IFS= read -r -d '' __envmgr_cur < "$__envmgr_f"; } 2>/dev/null || true
+    fi
+    __envmgr_cur="$__envmgr_f|$__envmgr_cur"
+    if [ "$__envmgr_cur" != "${__envmgr_last-}" ]; then
+      __envmgr_last=$__envmgr_cur
+      eval "$("$__envmgr_exe" sync --shell zsh)"
+    fi
+  fi
+  return $__envmgr_ret
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd __envmgr_hook

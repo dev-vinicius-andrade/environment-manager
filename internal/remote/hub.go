@@ -21,6 +21,8 @@ var (
 	ErrRelayTimeout = errors.New("agent did not answer in time")
 	// ErrAgentReadOnly means the parent only has read access to the child.
 	ErrAgentReadOnly = errors.New("agent was enrolled read-only; mutations are refused")
+	// ErrAgentNoHosts means the child was not enrolled with the hosts grant.
+	ErrAgentNoHosts = errors.New("agent was not granted hosts editing (revoke it and re-invite with --allow-hosts)")
 )
 
 // HubConfig configures a Hub.
@@ -134,10 +136,11 @@ type enrollRequest struct {
 
 // EnrollResponse is returned once to a child that enrolled successfully.
 type EnrollResponse struct {
-	Name       string `json:"name"`
-	Role       Role   `json:"role"`
-	Credential string `json:"credential"`
-	Parent     string `json:"parent"`
+	Name       string   `json:"name"`
+	Role       Role     `json:"role"`
+	Caps       []string `json:"caps,omitempty"`
+	Credential string   `json:"credential"`
+	Parent     string   `json:"parent"`
 }
 
 func (h *Hub) enroll(w http.ResponseWriter, r *http.Request) {
@@ -166,8 +169,8 @@ func (h *Hub) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.limiter.success(ip)
-	h.log.Printf("agent=%s enrolled (role %s) from %s", rec.Name, rec.Role, ip)
-	writeJSON(w, http.StatusOK, EnrollResponse{Name: rec.Name, Role: rec.Role, Credential: cred, Parent: h.cfg.Label})
+	h.log.Printf("agent=%s enrolled (role %s, caps %v) from %s", rec.Name, rec.Role, rec.Caps, ip)
+	writeJSON(w, http.StatusOK, EnrollResponse{Name: rec.Name, Role: rec.Role, Caps: rec.Caps, Credential: cred, Parent: h.cfg.Label})
 }
 
 type agentHandler func(w http.ResponseWriter, r *http.Request, a AgentRecord)
@@ -295,20 +298,25 @@ func (h *Hub) result(w http.ResponseWriter, r *http.Request, a AgentRecord) {
 		writeError(w, http.StatusNotFound, "unknown job")
 		return
 	}
-	h.log.Printf("agent=%s op=%s profile=%q ok=%v", a.Name, pj.job.Op, pj.job.Args.Profile, res.OK)
+	if pj.job.IsHosts() {
+		h.log.Printf("agent=%s op=%s profile=%q group=%q hostnames=%v dryRun=%v ok=%v", a.Name, pj.job.Op, pj.job.Args.Profile, pj.job.Args.Group, pj.job.Args.Hostnames, pj.job.Args.DryRun, res.OK)
+	} else {
+		h.log.Printf("agent=%s op=%s profile=%q ok=%v", a.Name, pj.job.Op, pj.job.Args.Profile, res.OK)
+	}
 	h.finish(pj, res)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // AgentInfo is what /v1/agent/ping returns to a child.
 type AgentInfo struct {
-	Name   string `json:"name"`
-	Role   Role   `json:"role"`
-	Parent string `json:"parent"`
+	Name   string   `json:"name"`
+	Role   Role     `json:"role"`
+	Caps   []string `json:"caps,omitempty"`
+	Parent string   `json:"parent"`
 }
 
 func (h *Hub) ping(w http.ResponseWriter, r *http.Request, a AgentRecord) {
-	writeJSON(w, http.StatusOK, AgentInfo{Name: a.Name, Role: a.Role, Parent: h.cfg.Label})
+	writeJSON(w, http.StatusOK, AgentInfo{Name: a.Name, Role: a.Role, Caps: a.Caps, Parent: h.cfg.Label})
 }
 
 func (h *Hub) leave(w http.ResponseWriter, r *http.Request, a AgentRecord) {
@@ -325,6 +333,7 @@ func (h *Hub) leave(w http.ResponseWriter, r *http.Request, a AgentRecord) {
 type AgentStatus struct {
 	Name       string     `json:"name"`
 	Role       Role       `json:"role"`
+	Caps       []string   `json:"caps,omitempty"`
 	EnrolledAt time.Time  `json:"enrolledAt"`
 	LastSeen   *time.Time `json:"lastSeen,omitempty"`
 	Online     bool       `json:"online"`
@@ -340,7 +349,7 @@ func (h *Hub) Status() ([]AgentStatus, error) {
 	defer h.mu.Unlock()
 	out := make([]AgentStatus, 0, len(agents))
 	for _, a := range agents {
-		s := AgentStatus{Name: a.Name, Role: a.Role, EnrolledAt: a.EnrolledAt, Online: h.onlineLocked(a.Name)}
+		s := AgentStatus{Name: a.Name, Role: a.Role, Caps: a.Caps, EnrolledAt: a.EnrolledAt, Online: h.onlineLocked(a.Name)}
 		if t, ok := h.seen[a.Name]; ok && !t.Before(a.EnrolledAt) {
 			t := t
 			s.LastSeen = &t
@@ -363,6 +372,9 @@ func (h *Hub) Relay(ctx context.Context, agent string, job Job) (Result, error) 
 	rec, err := h.state.Agent(agent)
 	if err != nil {
 		return Result{}, err
+	}
+	if job.IsHosts() && !HasCap(rec.Caps, CapHosts) {
+		return Result{}, ErrAgentNoHosts
 	}
 	if job.Mutates() && rec.Role != RoleReadWrite {
 		return Result{}, ErrAgentReadOnly
@@ -425,7 +437,7 @@ func (h *Hub) AdminHandler(adminToken string) http.Handler {
 			writeError(w, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrAgentOffline):
 			writeError(w, http.StatusConflict, err.Error())
-		case errors.Is(err, ErrAgentReadOnly):
+		case errors.Is(err, ErrAgentReadOnly), errors.Is(err, ErrAgentNoHosts):
 			writeError(w, http.StatusForbidden, err.Error())
 		case errors.Is(err, ErrRelayTimeout):
 			writeError(w, http.StatusGatewayTimeout, err.Error())

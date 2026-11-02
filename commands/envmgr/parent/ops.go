@@ -28,7 +28,7 @@ func createProfilesCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.
 // parent show <agent> <profile> [--reveal]
 func createShowCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Command {
 	var reveal bool
-	command := newLeaf(parent, "show <agent> <profile>", "Show a child's profile (values masked unless --reveal)", 2,
+	command := newLeaf(parent, "show <agent> <profile>", "Show a child's profile: variables (masked unless --reveal) and hosts entries", 2,
 		func(cmd *cobra.Command, args []string) error {
 			p, err := fetch(args[0], args[1])
 			if err != nil {
@@ -71,10 +71,13 @@ func createPushCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Comm
 			if err != nil {
 				return fmt.Errorf("local profile %q: %w", args[1], err)
 			}
-			if _, err := relay(args[0], agent.Job{Op: agent.OpPut, Args: agent.JobArgs{Profile: p.Name, Vars: p.Vars}}); err != nil {
+			if _, err := relay(args[0], agent.Job{Op: agent.OpPut, Args: agent.JobArgs{Profile: p.Name, Vars: p.Vars, Hosts: p.Hosts}}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "pushed %q (%d vars) to %s\n", p.Name, len(p.Vars), args[0])
+			fmt.Fprintf(cmd.ErrOrStderr(), "pushed %q (%d vars, %d hosts entries) to %s\n", p.Name, len(p.Vars), len(p.Hosts), args[0])
+			if len(p.Hosts) > 0 {
+				fmt.Fprintf(cmd.ErrOrStderr(), "note: the hosts entries are stored in the child's profile only; apply them with \"envmgr parent hosts %s apply-profile %s\" (needs --allow-hosts) or on the child\n", args[0], p.Name)
+			}
 			return nil
 		})
 }
@@ -103,7 +106,7 @@ func createPullCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Comm
 			if err := store.Save(p); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "pulled %q (%d vars) from %s\n", p.Name, len(p.Vars), args[0])
+			fmt.Fprintf(cmd.ErrOrStderr(), "pulled %q (%d vars, %d hosts entries) from %s\n", p.Name, len(p.Vars), len(p.Hosts), args[0])
 			return nil
 		})
 	command.Flags().BoolVar(&force, "force", false, "overwrite an existing local profile")

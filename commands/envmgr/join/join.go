@@ -35,6 +35,9 @@ func (c *commandDefinition) runCommand(cmd *cobra.Command, args []string) error 
 		return err
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "joined parent %s (%s) as %q with role %s\n", b.Parent, b.Addr, b.Name, b.Role)
+	if remote.HasCap(b.Caps, remote.CapHosts) {
+		fmt.Fprintln(cmd.ErrOrStderr(), "this parent was granted hosts editing: it may change the envmgr block of this machine's hosts file (`envmgr agent leave` to undo)")
+	}
 	if c.noRun {
 		fmt.Fprintln(cmd.ErrOrStderr(), "start the connection later with: envmgr agent run")
 		return nil

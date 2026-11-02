@@ -24,6 +24,8 @@ const (
 	modeEditValue
 	modeConfirmDelete
 	modeNotice
+	modeEditHost // hosts entry form (ip, names, comment)
+	modeScope    // activate dialog: environment / hosts / both
 )
 
 type pane int
@@ -40,8 +42,9 @@ type notice struct {
 	oneLine string // the exact command offered for copying
 }
 
-// profilesScreen lists profiles (left) and the selected profile's variables
-// (right).
+// profilesScreen lists profiles (left) and the selected profile's details
+// (right): its Variables and Hosts sections (tab switches them when the
+// right pane is focused).
 type profilesScreen struct {
 	env *env
 
@@ -55,6 +58,9 @@ type profilesScreen struct {
 	varCursor int
 	loadErr   error
 
+	section    section // Variables or Hosts in the right pane
+	hostCursor int     // index in current.Hosts
+
 	reveal bool
 	mode   mode
 	filter string
@@ -63,6 +69,12 @@ type profilesScreen struct {
 	nameInput   textinput.Model
 	keyInput    textinput.Model
 	valueInput  textinput.Model
+
+	hostIP      textinput.Model
+	hostNames   textinput.Model
+	hostComment textinput.Model
+	hostField   int    // focused field of the hosts entry form
+	hostOrig    string // IP of the entry being edited ("" = new entry)
 
 	notice notice
 
@@ -77,6 +89,9 @@ func newProfilesScreen(e *env) *profilesScreen {
 	s.nameInput = st.newInput("name: ", 64)
 	s.keyInput = st.newInput("variable: ", 128)
 	s.valueInput = st.newInput("value: ", 0)
+	s.hostIP = st.newInput("ip: ", 64)
+	s.hostNames = st.newInput("hostnames: ", 0)
+	s.hostComment = st.newInput("comment: ", hostCommentMax)
 	s.reload("")
 	return s
 }
@@ -192,7 +207,9 @@ func (s *profilesScreen) loadSelected() {
 	sort.Strings(s.keys)
 	if prev != name {
 		s.varCursor = 0
+		s.hostCursor = 0
 	}
+	s.hostCursor = clamp(s.hostCursor, 0, len(p.Hosts)-1)
 	if s.varCursor >= len(s.keys) {
 		s.varCursor = len(s.keys) - 1
 	}
@@ -218,6 +235,10 @@ func (s *profilesScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, s.updateConfirmDelete(km)
 	case modeNotice:
 		return s, s.updateNotice(km)
+	case modeEditHost:
+		return s, s.updateEditHost(km)
+	case modeScope:
+		return s, s.updateScope(km)
 	}
 	return s, s.updateNormal(km)
 }
@@ -235,6 +256,9 @@ func (s *profilesScreen) updateInputs(msg tea.Msg) tea.Cmd {
 		s.keyInput, cmd = s.keyInput.Update(msg)
 	case modeEditValue:
 		s.valueInput, cmd = s.valueInput.Update(msg)
+	case modeEditHost:
+		in := s.hostInputs()[s.hostField]
+		*in, cmd = in.Update(msg)
 	}
 	return cmd
 }
@@ -256,6 +280,10 @@ func (s *profilesScreen) updateNormal(km tea.KeyMsg) tea.Cmd {
 		if s.selected() != "" {
 			s.focus = paneVars
 		}
+	case "tab", "shift+tab":
+		if s.focus == paneVars {
+			s.toggleSection()
+		}
 	case "enter", "a":
 		return s.activate()
 	case "d":
@@ -265,8 +293,15 @@ func (s *profilesScreen) updateNormal(km tea.KeyMsg) tea.Cmd {
 		s.nameInput.Reset()
 		return s.nameInput.Focus()
 	case "e":
+		if s.section == sectionHosts {
+			return s.startEditHost()
+		}
 		return s.startEdit()
 	case "x":
+		if s.section == sectionHosts {
+			s.deleteHost()
+			return nil
+		}
 		s.deleteVar()
 	case "D":
 		if s.selected() == "" {
@@ -286,6 +321,10 @@ func (s *profilesScreen) updateNormal(km tea.KeyMsg) tea.Cmd {
 }
 
 func (s *profilesScreen) move(delta int) {
+	if s.focus == paneVars && s.section == sectionHosts {
+		s.hostCursor = clamp(s.hostCursor+delta, 0, len(s.current.Hosts)-1)
+		return
+	}
 	if s.focus == paneVars {
 		s.varCursor = clamp(s.varCursor+delta, 0, len(s.keys)-1)
 		return
@@ -529,7 +568,24 @@ func (s *profilesScreen) updateConfirmDelete(km tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// activate activates the selected profile's environment, or opens the scope
+// dialog (environment / hosts / both) when the profile has hosts entries.
 func (s *profilesScreen) activate() tea.Cmd {
+	name := s.selected()
+	if name == "" {
+		s.setStatus("no profile selected; press n to create one", true)
+		return nil
+	}
+	if p, err := s.env.store.Get(name); err == nil && len(p.Hosts) > 0 {
+		s.mode = modeScope
+		s.setStatus("", false)
+		return nil
+	}
+	return s.activateEnv()
+}
+
+// activateEnv ends the program with the environment activation code.
+func (s *profilesScreen) activateEnv() tea.Cmd {
 	name := s.selected()
 	if name == "" {
 		s.setStatus("no profile selected; press n to create one", true)
@@ -638,16 +694,28 @@ func (s *profilesScreen) ShortHelp() []Hint {
 		return []Hint{{"y", "delete"}, {"n", "cancel"}}
 	case modeNotice:
 		return []Hint{{"c", "copy command"}, {"esc", "close"}}
+	case modeEditHost:
+		return []Hint{{"enter", "next/save"}, {"tab", "switch field"}, {"esc", "cancel"}}
+	case modeScope:
+		return []Hint{{"e", "environment"}, {"h", "hosts"}, {"b", "both"}, {"esc", "cancel"}}
 	}
 	reveal := "reveal"
 	if s.reveal {
 		reveal = "mask"
 	}
-	return []Hint{
+	edit, del := Hint{"e", "edit var"}, Hint{"x", "del var"}
+	if s.section == sectionHosts {
+		edit, del = Hint{"e", "edit host"}, Hint{"x", "del host"}
+	}
+	hints := []Hint{
 		{"enter", "activate"}, {"d", "deactivate"}, {"j/k", "move"}, {"h/l", "pane"},
-		{"n", "new"}, {"e", "edit var"}, {"x", "del var"}, {"D", "del profile"},
+		{"n", "new"}, edit, del, {"D", "del profile"},
 		{"r", reveal}, {"/", "filter"},
 	}
+	if s.focus == paneVars {
+		hints = append(hints, Hint{"tab", "vars/hosts"})
+	}
+	return hints
 }
 
 // FullHelp implements Screen.
@@ -655,11 +723,12 @@ func (s *profilesScreen) FullHelp() []Hint {
 	return []Hint{
 		{"up/down, j/k", "move in the focused pane"},
 		{"left/right, h/l", "focus profiles / variables"},
-		{"enter, a", "activate the selected profile (exits, prints shell code)"},
+		{"enter, a", "activate the selected profile (exits, prints shell code); a profile with hosts entries asks: e environment, h hosts (written by envmgr, needs an elevated terminal), b both"},
+		{"tab, shift+tab", "with the right pane focused: switch Variables / Hosts"},
 		{"d", "deactivate the active profile (exits, prints shell code)"},
 		{"n", "new profile"},
-		{"e", "edit the selected variable, or add one"},
-		{"x", "delete the selected variable"},
+		{"e", "edit the selected variable or hosts entry, or add one (Hosts: ip, hostnames, comment)"},
+		{"x", "delete the selected variable or hosts entry"},
 		{"D", "delete the selected profile (asks y/n)"},
 		{"r", "reveal / mask values"},
 		{"/", "filter profiles (enter keeps, esc clears)"},
@@ -691,6 +760,19 @@ func (s *profilesScreen) View(w, h int) string {
 		}
 	case modeConfirmDelete:
 		bottom = []string{st.Error.Render(fmt.Sprintf("Delete profile %q? (y/n)", s.selected()))}
+	case modeEditHost:
+		s.hostIP.Width = w - 6
+		s.hostNames.Width = w - 13
+		s.hostComment.Width = w - 11
+		bottom = []string{
+			st.PaneTitle.Render(fmt.Sprintf("Hosts entry in %q", s.current.Name)),
+			s.hostIP.View(), s.hostNames.View(), s.hostComment.View(),
+		}
+	case modeScope:
+		bottom = []string{
+			st.PaneTitle.Render(fmt.Sprintf("Activate %q", s.selected())),
+			"e/enter environment   h hosts (writes the hosts file)   b both   esc cancel",
+		}
 	case modeNotice:
 		return s.noticeView(w, h)
 	}
@@ -713,7 +795,7 @@ func (s *profilesScreen) panesView(w, h int) string {
 	if w < MinWidth {
 		// Narrow: only the focused pane.
 		if s.focus == paneVars {
-			return s.varsPane(w, h, true)
+			return s.detailPane(w, h, true)
 		}
 		return s.listPane(w, h, true)
 	}
@@ -722,7 +804,7 @@ func (s *profilesScreen) panesView(w, h int) string {
 		lw = 32
 	}
 	left := s.listPane(lw, h, s.focus == paneList)
-	right := s.varsPane(w-lw, h, s.focus == paneVars)
+	right := s.detailPane(w-lw, h, s.focus == paneVars)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
@@ -773,9 +855,11 @@ func (s *profilesScreen) listPane(w, h int, focused bool) string {
 	return s.framed(lines, w, h, focused)
 }
 
-func (s *profilesScreen) varsPane(w, h int, focused bool) string {
+// detailPane draws the selected profile: title, the Variables / Hosts
+// section line, then the rows of the current section.
+func (s *profilesScreen) detailPane(w, h int, focused bool) string {
 	st := s.env.styles
-	iw, rows := w-2, h-3
+	iw, rows := w-2, h-4
 	name := s.selected()
 	var lines []string
 	switch {
@@ -796,7 +880,11 @@ func (s *profilesScreen) varsPane(w, h int, focused bool) string {
 	if s.reveal {
 		title += " [revealed]"
 	}
-	lines = []string{st.PaneTitle.Render(fit(title, iw))}
+	lines = []string{st.PaneTitle.Render(fit(title, iw)), s.sectionTabs(iw)}
+	if s.section == sectionHosts {
+		lines = append(lines, s.hostsLines(iw, rows, focused)...)
+		return s.framed(lines, w, h, focused)
+	}
 	if len(s.keys) == 0 {
 		lines = append(lines, st.Dim.Render(fit("no variables; press e to add one", iw)))
 	}

@@ -40,6 +40,7 @@ type Invite struct {
 	NameFixed  bool      `json:"nameFixed"` // parent chose the name; the child cannot change it
 	SecretHash string    `json:"secretHash"`
 	Role       Role      `json:"role"`
+	Caps       []string  `json:"caps,omitempty"` // extra grants, e.g. CapHosts
 	CreatedAt  time.Time `json:"createdAt"`
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
@@ -49,6 +50,7 @@ type AgentRecord struct {
 	Name           string    `json:"name"`
 	CredentialHash string    `json:"credentialHash"`
 	Role           Role      `json:"role"`
+	Caps           []string  `json:"caps,omitempty"` // copied from the invite; change = revoke + re-invite
 	EnrolledAt     time.Time `json:"enrolledAt"`
 }
 
@@ -182,13 +184,16 @@ func (h *HubState) Invites() ([]Invite, error) {
 
 // CreateInvite stores a new single-use invite and returns its secret (shown
 // once, never stored). An empty name gets a generated one the child may
-// replace with its own proposal.
-func (h *HubState) CreateInvite(name string, role Role, ttl time.Duration) (string, Invite, error) {
+// replace with its own proposal. caps are extra grants (only CapHosts exists).
+func (h *HubState) CreateInvite(name string, role Role, ttl time.Duration, caps ...string) (string, Invite, error) {
 	if ttl <= 0 {
 		return "", Invite{}, errors.New("invite expiry must be positive")
 	}
 	if !role.Valid() {
 		return "", Invite{}, fmt.Errorf("invalid role %q", role)
+	}
+	if !ValidCaps(caps) {
+		return "", Invite{}, fmt.Errorf("invalid capabilities %q", caps)
 	}
 	fixed := name != ""
 	if !fixed {
@@ -202,7 +207,7 @@ func (h *HubState) CreateInvite(name string, role Role, ttl time.Duration) (stri
 		return "", Invite{}, err
 	}
 	now := h.now().UTC()
-	inv := Invite{Name: name, NameFixed: fixed, SecretHash: HashSecret(secret), Role: role, CreatedAt: now, ExpiresAt: now.Add(ttl)}
+	inv := Invite{Name: name, NameFixed: fixed, SecretHash: HashSecret(secret), Role: role, Caps: caps, CreatedAt: now, ExpiresAt: now.Add(ttl)}
 	err = h.withLock(func() error {
 		agents, err := h.readAgents()
 		if err != nil {
@@ -323,7 +328,7 @@ func (h *HubState) Enroll(secret, proposedName string) (AgentRecord, string, err
 		if cred, err = generateSecret(); err != nil {
 			return err
 		}
-		rec = AgentRecord{Name: name, CredentialHash: HashSecret(cred), Role: inv.Role, EnrolledAt: h.now().UTC()}
+		rec = AgentRecord{Name: name, CredentialHash: HashSecret(cred), Role: inv.Role, Caps: inv.Caps, EnrolledAt: h.now().UTC()}
 		// Consume the invite first: a crash in between leaves an unusable
 		// invite rather than a reusable one.
 		if err := h.writeInvites(append(invites[:idx:idx], invites[idx+1:]...)); err != nil {

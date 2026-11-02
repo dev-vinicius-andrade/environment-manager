@@ -178,7 +178,8 @@ func (a *AdminClient) Relay(agent string, job Job) (Result, error) {
 
 // CreateJoinCode stores a single-use invite in st and returns the join code
 // for a child (publicAddr must be reachable from the child).
-func CreateJoinCode(st *HubState, fingerprint, publicAddr, name string, role Role, ttl time.Duration) (string, Invite, error) {
+// caps are extra grants recorded with the invite (only CapHosts exists).
+func CreateJoinCode(st *HubState, fingerprint, publicAddr, name string, role Role, ttl time.Duration, caps ...string) (string, Invite, error) {
 	if err := ValidAddress(publicAddr); err != nil {
 		return "", Invite{}, err
 	}
@@ -186,7 +187,7 @@ func CreateJoinCode(st *HubState, fingerprint, publicAddr, name string, role Rol
 	if err != nil {
 		return "", Invite{}, err
 	}
-	secret, inv, err := st.CreateInvite(name, role, ttl)
+	secret, inv, err := st.CreateInvite(name, role, ttl, caps...)
 	if err != nil {
 		return "", Invite{}, err
 	}

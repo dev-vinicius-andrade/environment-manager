@@ -49,7 +49,7 @@ func runRoundTrip(t *testing.T, rt roundTrip) {
 	}
 	pb := profile.Profile{Name: "b", Vars: map[string]string{"SHARED": payloads[0], "NEWB": "b value"}}
 
-	names := []string{"ORIG", "KEEP", "SHARED", "NEWB", "PWNED", EnvProfile, EnvVars}
+	names := []string{"ORIG", "KEEP", "SHARED", "NEWB", "PWNED", EnvProfile, EnvVars, EnvPinned}
 	for n := range pa.Vars {
 		if n != "ORIG" && n != "SHARED" {
 			names = append(names, n)

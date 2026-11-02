@@ -89,7 +89,7 @@ func TestUseSwitchDeactivate(t *testing.T) {
 	wantE1 := map[string]string{
 		"ORIG": "a-orig", "ONLY_A": "x", "SHARED": "a", "EMPTY_ORIG": "a", "KEEP": "keep",
 		"ENVMGR_PREV_ORIG": "original", "ENVMGR_PREV_EMPTY_ORIG": "",
-		EnvProfile: "a", EnvVars: "EMPTY_ORIG,ONLY_A,ORIG,SHARED",
+		EnvProfile: "a", EnvVars: "EMPTY_ORIG,ONLY_A,ORIG,SHARED", EnvPinned: "1",
 	}
 	if !reflect.DeepEqual(e1, wantE1) {
 		t.Fatalf("after use a:\n got %v\nwant %v", e1, wantE1)
@@ -104,7 +104,7 @@ func TestUseSwitchDeactivate(t *testing.T) {
 	wantE2 := map[string]string{
 		"ORIG": "original", "EMPTY_ORIG": "", "KEEP": "keep",
 		"SHARED": "b", "ONLY_B": "y",
-		EnvProfile: "b", EnvVars: "ONLY_B,SHARED",
+		EnvProfile: "b", EnvVars: "ONLY_B,SHARED", EnvPinned: "1",
 	}
 	if !reflect.DeepEqual(e2, wantE2) {
 		t.Fatalf("after switch to b:\n got %v\nwant %v", e2, wantE2)
@@ -129,7 +129,7 @@ func TestUseEmptyProfileClearsVars(t *testing.T) {
 	a := profile.Profile{Name: "a", Vars: map[string]string{"X": "1"}}
 	empty := profile.Profile{Name: "empty", Vars: map[string]string{}}
 	e := use(t, use(t, map[string]string{}, a), empty)
-	want := map[string]string{EnvProfile: "empty"}
+	want := map[string]string{EnvProfile: "empty", EnvPinned: "1"}
 	if !reflect.DeepEqual(e, want) {
 		t.Fatalf("got %v want %v", e, want)
 	}

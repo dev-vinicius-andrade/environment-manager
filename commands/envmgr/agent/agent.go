@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/dev-vinicius-andrade/environment-manager/helpers"
@@ -64,8 +65,12 @@ func (c *commandDefinition) defineSubCommands() {
 			return err
 		}
 		out := cmd.OutOrStdout()
-		fmt.Fprintf(out, "parent:      %s (%s)\nname:        %s\nrole:        %s\nfingerprint: %s\nenrolled:    %s\n",
-			b.Parent, b.Addr, b.Name, b.Role, b.Fingerprint, b.EnrolledAt.Local().Format("2006-01-02 15:04"))
+		caps := "none"
+		if len(b.Caps) > 0 {
+			caps = strings.Join(b.Caps, ",")
+		}
+		fmt.Fprintf(out, "parent:      %s (%s)\nname:        %s\nrole:        %s\ncaps:        %s\nfingerprint: %s\nenrolled:    %s\n",
+			b.Parent, b.Addr, b.Name, b.Role, caps, b.Fingerprint, b.EnrolledAt.Local().Format("2006-01-02 15:04"))
 		a, err := remote.NewAgent(b, nil, nil)
 		if err != nil {
 			return err
@@ -146,6 +151,9 @@ func RunLoop(cmd *cobra.Command, b *remote.Binding) error {
 	sigCtx, stop := signal.NotifyContext(base, os.Interrupt)
 	defer stop()
 	fmt.Fprintf(stderr, "connecting to parent %s (%s) as %q, role %s; Ctrl+C stops\n", b.Parent, b.Addr, b.Name, b.Role)
+	if remote.HasCap(b.Caps, remote.CapHosts) {
+		fmt.Fprintf(stderr, "this parent may edit the envmgr block of the hosts file %s\n", a.HostsFile)
+	}
 	if err := a.Run(sigCtx); err != nil {
 		return err
 	}

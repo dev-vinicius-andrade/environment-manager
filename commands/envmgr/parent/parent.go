@@ -33,9 +33,11 @@ func (c *commandDefinition) createCommandDefinition() *cobra.Command {
   envmgr parent invite --name laptop       print a single-use, expiring join command for a child
   envmgr parent agents                     list enrolled children (online or not)
   envmgr parent show laptop dev            operate on a child's profiles
+  envmgr parent hosts laptop list          edit a child's hosts file (needs invite --allow-hosts)
   envmgr parent revoke laptop              cut a child off immediately
 
-Only profile operations exist; nothing can be executed on a child.`,
+Only profile operations exist, plus edits of the child's hosts-file managed block
+when the child was invited with --allow-hosts; nothing can be executed on a child.`,
 		Run: c.runCommand,
 	}
 	c.cmd = command
@@ -60,6 +62,7 @@ func (c *commandDefinition) defineSubCommands() {
 		createSetCommand,
 		createUnsetCommand,
 		createDeleteCommand,
+		createHostsCommand,
 	} {
 		sub(c.context, c.cmd)
 	}

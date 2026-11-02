@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/dev-vinicius-andrade/environment-manager/internal/hosts"
 	"github.com/dev-vinicius-andrade/environment-manager/internal/profile"
 	"github.com/dev-vinicius-andrade/environment-manager/internal/shell"
 )
@@ -68,6 +69,9 @@ type Options struct {
 	Styles *Styles
 	// Command is how the user invokes envmgr in one-liners (default "envmgr").
 	Command string
+	// HostsFile is the hosts file a profile's hosts are applied to (default:
+	// hosts.ResolvePath, i.e. $ENVMGR_HOSTS_FILE or the system file).
+	HostsFile string
 }
 
 // env is what every screen shares.
@@ -79,6 +83,7 @@ type env struct {
 	copy        func(string) error
 	styles      Styles
 	command     string
+	hostsFile   string
 	activeName  string
 	activeState shell.State
 }
@@ -105,6 +110,10 @@ func New(o Options) *App {
 		stdoutTTY: o.StdoutIsTerminal,
 		copy:      o.Copy,
 		command:   o.Command,
+		hostsFile: o.HostsFile,
+	}
+	if e.hostsFile == "" {
+		e.hostsFile, _ = hosts.ResolvePath("")
 	}
 	if e.kind == "" {
 		e.kind = shell.Detect()
@@ -153,7 +162,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showHelp = false
 			return a, nil
 		}
-		if !a.screens[a.active].Capturing() {
+		claimed := false
+		if kc, ok := a.screens[a.active].(KeyClaimer); ok {
+			claimed = kc.ClaimsKey(msg.String())
+		}
+		if !a.screens[a.active].Capturing() && !claimed {
 			switch msg.String() {
 			case "q", "esc":
 				return a.quit()

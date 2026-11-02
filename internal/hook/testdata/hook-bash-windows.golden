@@ -1,0 +1,30 @@
+# envmgr hook (bash): follow the machine-wide profile selection (envmgr select / tray).
+__envmgr_exe='C:/Users/José O'\''Neil/bin/envmgr.exe'
+__envmgr_default_sel='C:/Users/José O'\''Neil/AppData/Roaming/envmgr/selected.json'
+__envmgr_hook() {
+  local __envmgr_ret=$?
+  if [ -z "${ENVMGR_PINNED:-}" ] || [ "${ENVMGR_PINNED}" = 0 ]; then
+    local __envmgr_f="${ENVMGR_HOME:+$ENVMGR_HOME/selected.json}"
+    __envmgr_f="${__envmgr_f:-$__envmgr_default_sel}"
+    local __envmgr_cur=""
+    if [ -f "$__envmgr_f" ]; then
+      { IFS= read -r -d '' __envmgr_cur < "$__envmgr_f"; } 2>/dev/null || true
+    fi
+    __envmgr_cur="$__envmgr_f|$__envmgr_cur"
+    if [ "$__envmgr_cur" != "${__envmgr_last-}" ]; then
+      __envmgr_last=$__envmgr_cur
+      eval "$("$__envmgr_exe" sync --shell bash)"
+    fi
+  fi
+  return $__envmgr_ret
+}
+case ";${PROMPT_COMMAND[*]:-};" in
+  *__envmgr_hook*) ;;
+  *)
+    if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
+      PROMPT_COMMAND=(__envmgr_hook "${PROMPT_COMMAND[@]}")
+    else
+      PROMPT_COMMAND="__envmgr_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    fi
+    ;;
+esac

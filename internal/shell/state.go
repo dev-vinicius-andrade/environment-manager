@@ -14,7 +14,18 @@ const (
 	EnvProfile = "ENVMGR_PROFILE"
 	EnvVars    = "ENVMGR_VARS"
 	PrevPrefix = "ENVMGR_PREV_"
+	// EnvPinned is "1" in a session that chose its profile itself (use, TUI):
+	// such a session ignores the machine-wide selection until `envmgr follow`.
+	EnvPinned = "ENVMGR_PINNED"
 )
+
+// Pinned reports whether the session read through lookup is pinned
+// (ENVMGR_PINNED set to anything but "" or "0").
+func Pinned(lookup LookupFunc) bool {
+	v, ok := lookup(EnvPinned)
+	v = strings.TrimSpace(v)
+	return ok && v != "" && v != "0"
+}
 
 // reservedPrefix marks variables owned by envmgr; profiles may not set them.
 const reservedPrefix = "ENVMGR_"
@@ -86,8 +97,19 @@ func restoreOps(lookup LookupFunc, st State) []Op {
 
 // UseOps returns the changes that activate p in an environment read through
 // lookup: undo the active profile (if any), back up and set p's variables, and
-// record the new state.
+// record the new state. The session is pinned (ENVMGR_PINNED=1): it no longer
+// follows the machine-wide selection.
 func UseOps(lookup LookupFunc, p profile.Profile) ([]Op, error) {
+	return useOps(lookup, p, true)
+}
+
+// FollowUseOps is UseOps for a session that follows the machine-wide selection
+// (envmgr sync / follow): same changes, but ENVMGR_PINNED is removed instead of set.
+func FollowUseOps(lookup LookupFunc, p profile.Profile) ([]Op, error) {
+	return useOps(lookup, p, false)
+}
+
+func useOps(lookup LookupFunc, p profile.Profile, pin bool) ([]Op, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -128,18 +150,32 @@ func UseOps(lookup LookupFunc, p profile.Profile) ([]Op, error) {
 	} else {
 		ops = append(ops, unsetOp(EnvVars))
 	}
+	if pin {
+		ops = append(ops, setOp(EnvPinned, "1"))
+	} else {
+		ops = append(ops, unsetOp(EnvPinned))
+	}
 	return ops, nil
 }
 
 // DeactivateOps returns the changes that undo the active profile and clear the
-// state variables. It returns no ops when nothing is active.
+// state variables (ENVMGR_PINNED included, so the session follows the
+// machine-wide selection again). It returns no ops when nothing is active.
 func DeactivateOps(lookup LookupFunc) []Op {
 	st := ReadState(lookup)
 	if !st.Active() {
 		return nil
 	}
 	ops := restoreOps(lookup, st)
-	return append(ops, unsetOp(EnvProfile), unsetOp(EnvVars))
+	return append(ops, unsetOp(EnvProfile), unsetOp(EnvVars), unsetOp(EnvPinned))
+}
+
+// UnpinOps returns the op that clears ENVMGR_PINNED (none when not pinned).
+func UnpinOps(lookup LookupFunc) []Op {
+	if _, ok := lookup(EnvPinned); !ok {
+		return nil
+	}
+	return []Op{unsetOp(EnvPinned)}
 }
 
 // Apply applies ops to an environment map (used by tests and simulations).
@@ -173,4 +209,14 @@ func Use(k Kind, lookup LookupFunc, p profile.Profile) (string, error) {
 // Deactivate renders the shell code that undoes the active profile ("" when none).
 func Deactivate(k Kind, lookup LookupFunc) (string, error) {
 	return Render(k, DeactivateOps(lookup))
+}
+
+// FollowUse renders the shell code that activates p for a session following
+// the machine-wide selection (no pin; see FollowUseOps).
+func FollowUse(k Kind, lookup LookupFunc, p profile.Profile) (string, error) {
+	ops, err := FollowUseOps(lookup, p)
+	if err != nil {
+		return "", err
+	}
+	return Render(k, ops)
 }

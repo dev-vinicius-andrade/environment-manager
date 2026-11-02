@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dev-vinicius-andrade/environment-manager/internal/hosts"
 	"github.com/dev-vinicius-andrade/environment-manager/internal/profile"
 )
 
@@ -82,6 +83,7 @@ type Binding struct {
 	Credential  string    `json:"credential"` // this child's own credential
 	Name        string    `json:"name"`       // this child's agent name at the parent
 	Role        Role      `json:"role"`
+	Caps        []string  `json:"caps,omitempty"` // extra grants from the parent, e.g. CapHosts
 	EnrolledAt  time.Time `json:"enrolledAt"`
 }
 
@@ -98,7 +100,7 @@ func LoadBinding(dir string) (*Binding, error) {
 	if err := json.Unmarshal(b, &bd); err != nil {
 		return nil, fmt.Errorf("%s: %w", bindingFile, err)
 	}
-	if ValidAddress(bd.Addr) != nil || !validSecret(bd.Credential) || !bd.Role.Valid() {
+	if ValidAddress(bd.Addr) != nil || !validSecret(bd.Credential) || !bd.Role.Valid() || !ValidCaps(bd.Caps) {
 		return nil, fmt.Errorf("%s is malformed; run `envmgr agent leave` and join again", bindingFile)
 	}
 	if bd.Fingerprint, err = NormalizeFingerprint(bd.Fingerprint); err != nil {
@@ -155,7 +157,7 @@ func Join(ctx context.Context, dir, code, name string, force bool) (*Binding, er
 		}
 		return nil, err
 	}
-	if !validSecret(resp.Credential) || !profile.ValidName(resp.Name) || !resp.Role.Valid() {
+	if !validSecret(resp.Credential) || !profile.ValidName(resp.Name) || !resp.Role.Valid() || !ValidCaps(resp.Caps) {
 		return nil, errors.New("invalid enrollment response from parent")
 	}
 	if old != nil {
@@ -163,7 +165,7 @@ func Join(ctx context.Context, dir, code, name string, force bool) (*Binding, er
 			_ = a.Leave(ctx)
 		}
 	}
-	b := &Binding{Parent: resp.Parent, Addr: jc.Addr, Fingerprint: jc.FP, Credential: resp.Credential, Name: resp.Name, Role: resp.Role, EnrolledAt: time.Now().UTC()}
+	b := &Binding{Parent: resp.Parent, Addr: jc.Addr, Fingerprint: jc.FP, Credential: resp.Credential, Name: resp.Name, Role: resp.Role, Caps: resp.Caps, EnrolledAt: time.Now().UTC()}
 	if err := SaveBinding(dir, b); err != nil {
 		return nil, err
 	}
@@ -181,6 +183,10 @@ type Agent struct {
 	OnState func(string)
 	// MaxBackoff caps the reconnect delay (default 60s).
 	MaxBackoff time.Duration
+	// HostsFile is this machine's hosts file for granted hosts.* jobs
+	// (default: hosts.ResolvePath, i.e. $ENVMGR_HOSTS_FILE or the system file).
+	// It is never taken from the network.
+	HostsFile string
 }
 
 // NewAgent returns the loop for binding b.
@@ -192,7 +198,8 @@ func NewAgent(b *Binding, store *profile.Store, logger *log.Logger) (*Agent, err
 	if err != nil {
 		return nil, err
 	}
-	return &Agent{b: b, store: store, log: logger, http: c, MaxBackoff: 60 * time.Second}, nil
+	hostsFile, _ := hosts.ResolvePath("")
+	return &Agent{b: b, store: store, log: logger, http: c, MaxBackoff: 60 * time.Second, HostsFile: hostsFile}, nil
 }
 
 func (a *Agent) url(path string) string { return "https://" + a.b.Addr + path }
@@ -281,8 +288,13 @@ func (a *Agent) once(ctx context.Context) error {
 	if status == http.StatusNoContent {
 		return nil
 	}
-	res := Execute(a.store, a.b.Role, job)
-	a.log.Printf("parent op=%s profile=%q ok=%v", job.Op, job.Args.Profile, res.OK)
+	res := ExecuteJob(Target{Store: a.store, Role: a.b.Role, Caps: a.b.Caps, HostsFile: a.HostsFile}, job)
+	if job.IsHosts() {
+		// Audit trail for hosts edits (security sensitive).
+		a.log.Printf("parent=%q op=%s profile=%q group=%q hostnames=%v dryRun=%v ok=%v%s", a.b.Parent, job.Op, job.Args.Profile, job.Args.Group, job.Args.Hostnames, job.Args.DryRun, res.OK, errSuffix(res))
+	} else {
+		a.log.Printf("parent op=%s profile=%q ok=%v", job.Op, job.Args.Profile, res.OK)
+	}
 	if !validJobID(job.ID) {
 		return nil
 	}
@@ -294,6 +306,13 @@ func (a *Agent) once(ctx context.Context) error {
 		return nil // parent stopped waiting
 	}
 	return err
+}
+
+func errSuffix(res Result) string {
+	if res.OK || res.Error == "" {
+		return ""
+	}
+	return fmt.Sprintf(" error=%q", res.Error)
 }
 
 func validJobID(id string) bool {

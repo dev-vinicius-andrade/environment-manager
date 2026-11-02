@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -16,11 +17,19 @@ const timeFmt = "2006-01-02 15:04"
 
 func fmtTime(t time.Time) string { return t.Local().Format(timeFmt) }
 
+// fmtCaps shows extra grants ("-" when none).
+func fmtCaps(caps []string) string {
+	if len(caps) == 0 {
+		return "-"
+	}
+	return strings.Join(caps, ",")
+}
+
 // parent invite [--name n] [--expires 15m] [--read-only] [--addr-public host:port]
 func createInviteCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Command {
 	var name, addrPublic string
 	var expires time.Duration
-	var readOnly bool
+	var readOnly, allowHosts bool
 	command := newLeaf(parent, "invite", "Create a single-use, expiring join code for a child", 0,
 		func(cmd *cobra.Command, args []string) error {
 			st, err := hubState()
@@ -47,12 +56,19 @@ func createInviteCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Co
 			if readOnly {
 				role = agent.RoleReadOnly
 			}
-			code, inv, err := agent.CreateJoinCode(st, id.Fingerprint, addrPublic, name, role, expires)
+			var caps []string
+			if allowHosts {
+				caps = append(caps, agent.CapHosts)
+			}
+			code, inv, err := agent.CreateJoinCode(st, id.Fingerprint, addrPublic, name, role, expires, caps...)
 			if err != nil {
 				return err
 			}
 			stderr := cmd.ErrOrStderr()
-			fmt.Fprintf(stderr, "invite %q (role %s) for %s, single use, expires %s\n", inv.Name, inv.Role, addrPublic, fmtTime(inv.ExpiresAt))
+			fmt.Fprintf(stderr, "invite %q (role %s, caps %s) for %s, single use, expires %s\n", inv.Name, inv.Role, fmtCaps(inv.Caps), addrPublic, fmtTime(inv.ExpiresAt))
+			if allowHosts {
+				fmt.Fprintln(stderr, "warning: --allow-hosts lets this parent edit the child's hosts file (it can redirect host names); grant it only to children you fully control")
+			}
 			if agent.IsLoopbackAddr(addrPublic) {
 				fmt.Fprintln(stderr, "note: the address is loopback; only a child on this machine (or through a tunnel) can use it")
 			}
@@ -64,6 +80,7 @@ func createInviteCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Co
 	f.StringVar(&name, "name", "", "agent name for the child (default: generated; the child may then propose its own with join --name)")
 	f.DurationVar(&expires, "expires", 15*time.Minute, "how long the code stays valid")
 	f.BoolVar(&readOnly, "read-only", false, "this parent may only read the child's profiles")
+	f.BoolVar(&allowHosts, "allow-hosts", false, "also let this parent edit the child's hosts file (managed block only; off by default)")
 	f.StringVar(&addrPublic, "addr-public", "", "host:port the child dials (default: the running hub's listen address)")
 	return command
 }
@@ -81,9 +98,9 @@ func createInvitesCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.C
 				return err
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tROLE\tCREATED\tEXPIRES")
+			fmt.Fprintln(tw, "NAME\tROLE\tCAPS\tCREATED\tEXPIRES")
 			for _, i := range invs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", i.Name, i.Role, fmtTime(i.CreatedAt), fmtTime(i.ExpiresAt))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", i.Name, i.Role, fmtCaps(i.Caps), fmtTime(i.CreatedAt), fmtTime(i.ExpiresAt))
 			}
 			return tw.Flush()
 		})
@@ -127,7 +144,7 @@ func createAgentsCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Co
 				seen := st.LastSeen()
 				rows = rows[:0]
 				for _, r := range recs {
-					s := agent.AgentStatus{Name: r.Name, Role: r.Role, EnrolledAt: r.EnrolledAt}
+					s := agent.AgentStatus{Name: r.Name, Role: r.Role, Caps: r.Caps, EnrolledAt: r.EnrolledAt}
 					if t, ok := seen[r.Name]; ok && !t.Before(r.EnrolledAt) {
 						s.LastSeen = &t
 					}
@@ -136,7 +153,7 @@ func createAgentsCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Co
 				fmt.Fprintln(cmd.ErrOrStderr(), "hub not running: every child is offline")
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tROLE\tENROLLED\tLAST SEEN\tONLINE")
+			fmt.Fprintln(tw, "NAME\tROLE\tCAPS\tENROLLED\tLAST SEEN\tONLINE")
 			for _, s := range rows {
 				last, online := "never", "no"
 				if s.LastSeen != nil {
@@ -145,7 +162,7 @@ func createAgentsCommand(_ *context.EnvContext, parent *cobra.Command) *cobra.Co
 				if s.Online {
 					online = "yes"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.Name, s.Role, fmtTime(s.EnrolledAt), last, online)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.Role, fmtCaps(s.Caps), fmtTime(s.EnrolledAt), last, online)
 			}
 			return tw.Flush()
 		})

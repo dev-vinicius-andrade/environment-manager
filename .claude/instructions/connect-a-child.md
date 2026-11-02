@@ -48,7 +48,7 @@ envmgr agent status                # parent, role, fingerprint, still accepted?
 ## 4. On the parent: use it
 
 ```sh
-envmgr parent agents                         # NAME ROLE ENROLLED LAST SEEN ONLINE
+envmgr parent agents                         # NAME ROLE CAPS ENROLLED LAST SEEN ONLINE
 envmgr parent profiles laptop
 envmgr parent show laptop dev                # values masked
 envmgr parent show laptop dev --reveal

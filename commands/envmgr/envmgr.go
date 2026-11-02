@@ -7,12 +7,19 @@ import (
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/agent"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/current"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/deactivate"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/follow"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/hook"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/hosts"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/join"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/list"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/parent"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/profile"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/run"
+	selectcmd "github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/selectcmd"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/selected"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/set"
+	synccmd "github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/synccmd"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/tray"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/tui"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/unset"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/use"
@@ -82,6 +89,13 @@ func (c *commandDefinition) defineSubCommands() {
 	join.CreateCommand(c.context, c.cmd)
 	agent.CreateCommand(c.context, c.cmd)
 	tui.CreateCommand(c.context, c.cmd)
+	hosts.CreateCommand(c.context, c.cmd)
+	selectcmd.CreateCommand(c.context, c.cmd)
+	selected.CreateCommand(c.context, c.cmd)
+	synccmd.CreateCommand(c.context, c.cmd)
+	follow.CreateCommand(c.context, c.cmd)
+	hook.CreateCommand(c.context, c.cmd)
+	tray.CreateCommand(c.context, c.cmd)
 }
 
 func (c *commandDefinition) runCommand(cmd *cobra.Command, args []string) {

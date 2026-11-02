@@ -44,3 +44,10 @@ type ExitMsg struct{ Result Result }
 func exitCmd(r Result) tea.Cmd {
 	return func() tea.Msg { return ExitMsg{Result: r} }
 }
+
+// KeyClaimer is optionally implemented by a screen that wants one of the
+// App's global keys (tab, shift+tab) in its current state, e.g. to switch
+// sections of a detail pane. The App then forwards the key to the screen.
+type KeyClaimer interface {
+	ClaimsKey(key string) bool
+}

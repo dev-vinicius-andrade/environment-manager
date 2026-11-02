@@ -1,4 +1,6 @@
-// Package profile stores named profiles of environment variables on disk.
+// Package profile stores named profiles on disk. A profile holds environment
+// variables, hosts entries, or both; each part is applied separately (see
+// .claude/docs/profiles.md).
 package profile
 
 import (
@@ -18,10 +20,13 @@ var (
 	ErrNotFound = errors.New("profile not found")
 )
 
-// Profile is a named set of environment variables.
+// Profile is a named set of environment variables and hosts entries. Either
+// part may be empty. Hosts is omitted from the JSON when empty, so files
+// written before hosts existed load unchanged.
 type Profile struct {
-	Name string            `json:"name"`
-	Vars map[string]string `json:"vars"`
+	Name  string            `json:"name"`
+	Vars  map[string]string `json:"vars"`
+	Hosts []HostEntry       `json:"hosts,omitempty"`
 }
 
 // ValidName reports whether s is a valid profile name (safe as a file name).
@@ -30,7 +35,7 @@ func ValidName(s string) bool { return nameRe.MatchString(s) }
 // ValidVar reports whether s is a valid environment variable name (safe to embed in shell code).
 func ValidVar(s string) bool { return varRe.MatchString(s) }
 
-// Validate checks the profile name and every variable name.
+// Validate checks the profile name, every variable name and every hosts entry.
 func (p Profile) Validate() error {
 	if !ValidName(p.Name) {
 		return fmt.Errorf("invalid profile name %q", p.Name)
@@ -39,6 +44,9 @@ func (p Profile) Validate() error {
 		if !ValidVar(k) {
 			return fmt.Errorf("invalid variable name %q", k)
 		}
+	}
+	if _, err := NormalizeHosts(p.Hosts); err != nil {
+		return fmt.Errorf("profile %q: %w", p.Name, err)
 	}
 	return nil
 }
@@ -95,7 +103,12 @@ func (s *Store) Get(name string) (Profile, error) {
 		pr.Vars = map[string]string{}
 	}
 	pr.Name = name
-	return pr, pr.Validate()
+	if err := pr.Validate(); err != nil {
+		return pr, err
+	}
+	// Canonical form (Validate already checked it cannot fail).
+	pr.Hosts, _ = NormalizeHosts(pr.Hosts)
+	return pr, nil
 }
 
 // Save validates and writes a profile (file mode 0600: profiles may hold secrets).
@@ -110,6 +123,11 @@ func (s *Store) Save(pr Profile) error {
 	if pr.Vars == nil {
 		pr.Vars = map[string]string{}
 	}
+	hs, err := NormalizeHosts(pr.Hosts)
+	if err != nil {
+		return err
+	}
+	pr.Hosts = hs
 	b, err := json.MarshalIndent(pr, "", "  ")
 	if err != nil {
 		return err
@@ -176,5 +194,42 @@ func (s *Store) UnsetVar(name, key string) error {
 		return err
 	}
 	delete(pr.Vars, key)
+	return s.Save(pr)
+}
+
+// SetHost maps hostnames to ip in a profile's hosts entries, creating the
+// profile if needed (see Profile.AddHost).
+func (s *Store) SetHost(name, ip string, hostnames ...string) error {
+	return s.SetHostEntry(name, HostEntry{IP: ip, Names: hostnames})
+}
+
+// SetHostEntry is SetHost with an optional comment (an empty comment keeps
+// the entry's existing one).
+func (s *Store) SetHostEntry(name string, e HostEntry) error {
+	if !ValidName(name) {
+		return fmt.Errorf("invalid profile name %q", name)
+	}
+	pr, err := s.Get(name)
+	if errors.Is(err, ErrNotFound) {
+		pr = Profile{Name: name, Vars: map[string]string{}}
+	} else if err != nil {
+		return err
+	}
+	if _, err := pr.AddHost(e.IP, e.Names, e.Comment); err != nil {
+		return err
+	}
+	return s.Save(pr)
+}
+
+// UnsetHost removes hostname from a profile's hosts entries (ErrHostNotFound
+// when the profile does not map it).
+func (s *Store) UnsetHost(name, hostname string) error {
+	pr, err := s.Get(name)
+	if err != nil {
+		return err
+	}
+	if err := pr.RemoveHostname(hostname); err != nil {
+		return err
+	}
 	return s.Save(pr)
 }

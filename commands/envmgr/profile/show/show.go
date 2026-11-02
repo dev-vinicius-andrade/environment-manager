@@ -3,7 +3,6 @@ package show
 import (
 	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/dev-vinicius-andrade/environment-manager/helpers"
 	"github.com/dev-vinicius-andrade/environment-manager/internal/profile"
@@ -11,18 +10,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// mask replaces every value unless --reveal is given; it does not leak length.
-const mask = "********"
-
 type commandDefinition struct {
 	cmd           *cobra.Command
 	context       *context.EnvContext
 	parentCommand *cobra.Command
 	reveal        bool
+	section       string
 }
 
 func (c *commandDefinition) runCommand(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
+	if err := profile.CheckSection(c.section); err != nil {
+		return err
+	}
 	store, err := profile.NewStore()
 	if err != nil {
 		return err
@@ -34,31 +34,37 @@ func (c *commandDefinition) runCommand(cmd *cobra.Command, args []string) error 
 	if err != nil {
 		return err
 	}
-	if len(p.Vars) == 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "envmgr: profile %q has no variables\n", p.Name)
-		return nil
-	}
-	keys := make([]string, 0, len(p.Vars))
-	for k := range p.Vars {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := mask
-		if c.reveal {
-			v = p.Vars[k]
+	stderr := cmd.ErrOrStderr()
+	switch c.section {
+	case profile.SectionVars:
+		if len(p.Vars) == 0 {
+			fmt.Fprintf(stderr, "envmgr: profile %q has no variables\n", p.Name)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s=%s\n", k, v)
+	case profile.SectionHosts:
+		if len(p.Hosts) == 0 {
+			fmt.Fprintf(stderr, "envmgr: profile %q has no hosts entries\n", p.Name)
+		}
+	default:
+		if len(p.Vars) == 0 && len(p.Hosts) == 0 {
+			fmt.Fprintf(stderr, "envmgr: profile %q has no variables and no hosts entries\n", p.Name)
+		} else if len(p.Vars) == 0 {
+			fmt.Fprintf(stderr, "envmgr: profile %q has no variables\n", p.Name)
+		}
 	}
-	return nil
+	return profile.Write(cmd.OutOrStdout(), p, c.reveal, c.section)
 }
 
 func (c *commandDefinition) createCommandDefinition() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "show <name>",
-		Short: "Show a profile's variables (values masked unless --reveal)",
-		Long: `Show a profile's variables as NAME=value lines, sorted by name. Values are
-masked because profiles often hold secrets; pass --reveal to print them.`,
+		Short: "Show a profile's variables (masked unless --reveal) and hosts entries",
+		Long: `Show a profile: its variables as NAME=value lines, sorted by name, and its
+hosts entries as "IP NAME... [# comment]" lines. Values are masked because
+profiles often hold secrets; pass --reveal to print them. Hosts entries are not
+secret and are always shown.
+
+When the profile has hosts entries, "# variables" and "# hosts" headers
+separate the parts; --section vars|hosts prints only one part, without header.`,
 		Args:          cobra.ExactArgs(1),
 		SilenceErrors: true,
 		RunE:          c.runCommand,
@@ -75,6 +81,10 @@ func (c *commandDefinition) defineSubCommands() {
 
 func (c *commandDefinition) defineFlags() {
 	c.cmd.Flags().BoolVar(&c.reveal, "reveal", false, "print the values instead of masking them")
+	c.cmd.Flags().StringVar(&c.section, "section", "", "print only one part: vars or hosts")
+	_ = c.cmd.RegisterFlagCompletionFunc("section", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{profile.SectionVars, profile.SectionHosts}, cobra.ShellCompDirectiveNoFileComp
+	})
 }
 
 func CreateCommand(context *context.EnvContext, parentCommand *cobra.Command) *cobra.Command {
