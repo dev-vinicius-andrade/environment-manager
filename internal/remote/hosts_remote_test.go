@@ -160,7 +160,7 @@ func TestHostsGrantedEndToEnd(t *testing.T) {
 	}
 
 	res = relayOK(t, e, "kid", Job{Op: OpHostsAdd, Args: JobArgs{IP: "10.0.0.5", Hostnames: []string{"api.dev.local", "db.dev.local"}, Group: "dev"}})
-	if !res.Hosts.Changed || res.Hosts.Backup == "" || res.Hosts.Path != hf {
+	if !res.Hosts.Changed || res.Hosts.Backup == "" || !samePath(res.Hosts.Path, hf) {
 		t.Fatalf("add %+v", res.Hosts)
 	}
 	got := readFile(t, hf)
@@ -231,7 +231,7 @@ func TestHostsReadOnlyChild(t *testing.T) {
 	c := joinChild(t, e.inviteCaps(t, "kiosk", RoleReadOnly, CapHosts), "")
 	hf := tempHosts(t)
 	c.runHosts(t, e, hf)
-	if res := relayOK(t, e, "kiosk", Job{Op: OpHostsList}); res.Hosts == nil || res.Hosts.Path != hf {
+	if res := relayOK(t, e, "kiosk", Job{Op: OpHostsList}); res.Hosts == nil || !samePath(res.Hosts.Path, hf) {
 		t.Fatalf("ro list %+v", res)
 	}
 	muts := []Job{
@@ -277,7 +277,7 @@ func TestHostsPathFromNetworkIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := ExecuteJob(Target{Role: RoleReadWrite, Caps: []string{CapHosts}, HostsFile: hf}, j)
-	if !res.OK || res.Hosts.Path != hf {
+	if !res.OK || !samePath(res.Hosts.Path, hf) {
 		t.Fatalf("%+v", res)
 	}
 	if _, err := os.Stat(evil); !errors.Is(err, os.ErrNotExist) {
@@ -311,4 +311,16 @@ func TestHostsPermissionDeniedIsStructured(t *testing.T) {
 	if res.Code != CodePermissionDenied || !strings.Contains(res.Error, "elevated") {
 		t.Fatalf("%+v", res)
 	}
+}
+
+// samePath compares two paths after resolving symlinks and short names (macOS
+// /var -> /private/var, Windows 8.3 temp dirs): the code resolves the path it
+// uses, the test builds it from t.TempDir().
+func samePath(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return ra == rb
 }
