@@ -97,7 +97,9 @@ func runRoundTrip(t *testing.T, rt roundTrip) {
 		Apply(want, ops)
 		want = normalize(want)
 		chunks = append(chunks, code)
-		got := rt.run(t, chunks, names)
+		// pwsh 7 keeps an empty variable that Windows PowerShell 5.1 removes:
+		// normalize what was read back the same way as the expectation.
+		got := normalize(rt.run(t, chunks, names))
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s:\n got %q\nwant %q\ncode:\n%s", label, got, want, code)
 		}
