@@ -1,4 +1,6 @@
-VERSION=latest
+VERSION=dev
+COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS=-X 'github.com/dev-vinicius-andrade/environment-manager/internal/buildinfo.Version=$(VERSION)' -X 'github.com/dev-vinicius-andrade/environment-manager/internal/buildinfo.Commit=$(COMMIT)'
 BINARY_NAME=envmgr
 OUTPUT_DIR=.bin
 ifeq ($(OS),Windows_NT)
@@ -10,7 +12,7 @@ clean:
 	@$(RM)
 build:
 	@echo "Building version: $(VERSION)"
-	go build -o $(OUTPUT_DIR)/$(GOARCH)/$(GOOS)/$(BINARY_NAME) --ldflags="-X 'main.version=$(VERSION)'" main.go
+	go build -o $(OUTPUT_DIR)/$(GOARCH)/$(GOOS)/$(BINARY_NAME) --ldflags="$(LDFLAGS)" main.go
 build_linux:
 	@$(MAKE) build GOOS=linux GOARCH=386
 	@$(MAKE) build GOOS=linux GOARCH=amd64
