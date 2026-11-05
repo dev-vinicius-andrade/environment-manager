@@ -7,8 +7,6 @@ import (
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr"
 )
 
-var version = "dsadasd"
-
 func main() {
 	//dotfilesInformation := &context.EnvContext{}
 	command := envmgr.CreateCommand()

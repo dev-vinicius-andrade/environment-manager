@@ -1,0 +1,62 @@
+name: release
+
+# Pushing a tag vMAJOR.MINOR.PATCH (or vX.Y.Z-rc.1 for a prerelease) builds every
+# target and publishes a GitHub release. Asset names are a contract with
+# `envmgr update`: see .claude/docs/releases.md.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: package
+        run: scripts/package.sh "${GITHUB_REF_NAME#v}" "${{ matrix.os }}" "${{ matrix.arch }}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: envmgr_${{ matrix.os }}_${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        working-directory: dist
+        run: sha256sum envmgr_* > checksums.txt && cat checksums.txt
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=""
+          case "$TAG" in *-*) flags="--prerelease" ;; esac
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes \
+            --verify-tag \
+            $flags

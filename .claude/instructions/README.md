@@ -13,6 +13,8 @@ Add one line per file: `file — what it explains`.
 
 - `dotfiles.md` — set up the `links` manifest, clone/register a dotfiles repo, status/link/pull/unlink, Windows `--copy`, trying it with a temp home
 
+- `cut-a-release.md` — tag and publish a release, check assets/checksums, try the install scripts and `envmgr update`, roll back a bad release
+
 - `add-tui-screen.md` — how to add a screen (tab) to the TUI: `Screen` interface, registration, output contract, tests
 
 Difference from `.claude/docs/`: docs explain what exists and why; instructions explain how to do a task.

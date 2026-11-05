@@ -23,7 +23,9 @@ import (
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/tray"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/tui"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/unset"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/update"
 	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/use"
+	"github.com/dev-vinicius-andrade/environment-manager/commands/envmgr/version"
 	"github.com/dev-vinicius-andrade/environment-manager/helpers"
 	"github.com/dev-vinicius-andrade/environment-manager/types"
 	"github.com/dev-vinicius-andrade/environment-manager/types/context"
@@ -91,6 +93,8 @@ func (c *commandDefinition) defineSubCommands() {
 	agent.CreateCommand(c.context, c.cmd)
 	tui.CreateCommand(c.context, c.cmd)
 	dotfiles.CreateCommand(c.context, c.cmd)
+	update.CreateCommand(c.context, c.cmd)
+	version.CreateCommand(c.context, c.cmd)
 	hosts.CreateCommand(c.context, c.cmd)
 	selectcmd.CreateCommand(c.context, c.cmd)
 	selected.CreateCommand(c.context, c.cmd)
