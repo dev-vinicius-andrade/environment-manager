@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -303,8 +304,12 @@ func TestLightTaskbarRefreshesIcon(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	a, b := MutexName(`C:\Users\X\envmgr`), MutexName(`c:\users\x\ENVMGR\`)
-	if a != b || !strings.HasPrefix(a, `Local\envmgr-tray-`) || a == MutexName(`C:\other`) {
+	home, same, other := `C:\Users\X\envmgr`, `c:\users\x\ENVMGR\`, `C:\other`
+	if runtime.GOOS != "windows" { // a backslash is not a path separator elsewhere
+		home, same, other = "/Users/X/envmgr", "/users/x/ENVMGR/", "/other"
+	}
+	a, b := MutexName(home), MutexName(same)
+	if a != b || !strings.HasPrefix(a, `Local\envmgr-tray-`) || a == MutexName(other) {
 		t.Fatalf("mutex names: %q %q", a, b)
 	}
 	if got := AutostartCommand(`C:\Program Files\envmgr\envmgr.exe`); got != `"C:\Program Files\envmgr\envmgr.exe" tray` {
