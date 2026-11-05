@@ -170,8 +170,8 @@ func (s *Spinner) print() *Spinner {
 }
 func (s *Spinner) Finish() {
 	clearLine()
-	icon := s.colors.FinishedIcon.Sprintf(s.icons.Finished)
-	message := s.colors.Text.Sprintf(s.finishedMsg)
+	icon := s.colors.FinishedIcon.Sprint(s.icons.Finished)
+	message := s.colors.Text.Sprint(s.finishedMsg)
 	fmt.Printf("\r %s - %s\n", icon, message)
 	color.Unset()
 	s.Reset()
@@ -184,7 +184,7 @@ func (s *Spinner) SetMessage(message string) *Spinner {
 }
 func (s *Spinner) SetFatalError(err error) {
 	clearLine()
-	icon := s.colors.ErrorIcon.Sprintf(s.icons.Error)
+	icon := s.colors.ErrorIcon.Sprint(s.icons.Error)
 	message := s.colors.ErrorText.Sprintf(" !!- %s", err)
 	fmt.Printf("\r %s - %s\n", icon, message)
 	color.Unset()
@@ -193,7 +193,7 @@ func (s *Spinner) SetFatalError(err error) {
 }
 func (s *Spinner) SetError(err error) {
 	clearLine()
-	icon := s.colors.ErrorIcon.Sprintf(s.icons.Error)
+	icon := s.colors.ErrorIcon.Sprint(s.icons.Error)
 	message := s.colors.ErrorText.Sprintf(" !!- %s", err)
 	fmt.Printf("\r %s - %s\n", icon, message)
 	color.Unset()

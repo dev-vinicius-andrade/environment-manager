@@ -1,0 +1,36 @@
+# envmgr hook (PowerShell): follow the machine-wide profile selection (envmgr select / tray).
+$global:__envmgr_exe = 'C:\Users\Jos' + [char]0x00E9 + ' O''Neil\bin\envmgr.exe'
+$global:__envmgr_default_sel = 'C:\Users\Jos' + [char]0x00E9 + ' O''Neil\AppData\Roaming\envmgr\selected.json'
+if (-not (Test-Path Variable:global:__envmgr_last)) { $global:__envmgr_last = $null }
+function global:__envmgr_hook {
+    if ($env:ENVMGR_PINNED -and $env:ENVMGR_PINNED -ne '0') { return }
+    $f = $global:__envmgr_default_sel
+    if ($env:ENVMGR_HOME) { $f = [System.IO.Path]::Combine($env:ENVMGR_HOME, 'selected.json') }
+    $key = $f + '|missing'
+    try {
+        $i = [System.IO.FileInfo]::new($f)
+        if ($i.Exists) { $key = $f + '|' + $i.LastWriteTimeUtc.Ticks + '|' + $i.Length }
+    } catch { }
+    if ($key -ne $global:__envmgr_last) {
+        $global:__envmgr_last = $key
+        $code = & $global:__envmgr_exe sync --shell powershell
+        foreach ($line in @($code)) { if ($line) { Invoke-Expression $line } }
+    }
+}
+$__envmgr_prev = Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue
+if (-not $__envmgr_prev -or $__envmgr_prev.ScriptBlock.ToString() -notmatch '__envmgr_hook') {
+    if ($__envmgr_prev) {
+        $global:__envmgr_orig_prompt = $__envmgr_prev.ScriptBlock
+    } else {
+        $global:__envmgr_orig_prompt = { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " }
+    }
+    function global:prompt {
+        $__envmgr_ok = $?
+        $__envmgr_lec = $global:LASTEXITCODE
+        try { __envmgr_hook } catch { Write-Host "envmgr hook: $_" -ForegroundColor Red }
+        $global:LASTEXITCODE = $__envmgr_lec
+        if (-not $__envmgr_ok) { Write-Error '' -ErrorAction Ignore }
+        & $global:__envmgr_orig_prompt
+    }
+}
+Remove-Variable __envmgr_prev -ErrorAction SilentlyContinue

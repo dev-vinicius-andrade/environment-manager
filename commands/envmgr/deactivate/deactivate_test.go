@@ -48,16 +48,16 @@ func TestDeactivateRestoresAndUnsets(t *testing.T) {
 	want := map[string]string{
 		"bash": "unset NEW\nunset ENVMGR_PREV_NEW\n" +
 			"export OLD='orig value'\nunset ENVMGR_PREV_OLD\n" +
-			"unset ENVMGR_PROFILE\nunset ENVMGR_VARS\n",
+			"unset ENVMGR_PROFILE\nunset ENVMGR_VARS\nunset ENVMGR_PINNED\n",
 		"powershell": "$env:NEW = $null\n$env:ENVMGR_PREV_NEW = $null\n" +
 			"$env:OLD = 'orig value'\n$env:ENVMGR_PREV_OLD = $null\n" +
-			"$env:ENVMGR_PROFILE = $null\n$env:ENVMGR_VARS = $null\n",
+			"$env:ENVMGR_PROFILE = $null\n$env:ENVMGR_VARS = $null\n$env:ENVMGR_PINNED = $null\n",
 		"fish": "set -e NEW\nset -e ENVMGR_PREV_NEW\n" +
 			"set -gx OLD 'orig value'\nset -e ENVMGR_PREV_OLD\n" +
-			"set -e ENVMGR_PROFILE\nset -e ENVMGR_VARS\n",
+			"set -e ENVMGR_PROFILE\nset -e ENVMGR_VARS\nset -e ENVMGR_PINNED\n",
 		"cmd": "@set NEW=\n@set ENVMGR_PREV_NEW=\n" +
 			"@set OLD=orig value\n@set ENVMGR_PREV_OLD=\n" +
-			"@set ENVMGR_PROFILE=\n@set ENVMGR_VARS=\n",
+			"@set ENVMGR_PROFILE=\n@set ENVMGR_VARS=\n@set ENVMGR_PINNED=\n",
 	}
 	for sh, w := range want {
 		out, _, err := execute("deactivate", "--shell", sh)

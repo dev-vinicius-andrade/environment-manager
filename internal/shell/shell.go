@@ -7,6 +7,8 @@
 //	ENVMGR_PROFILE        name of the active profile
 //	ENVMGR_VARS           comma separated names of the variables the profile set
 //	ENVMGR_PREV_<VAR>     value <VAR> had before activation (absent = it was unset)
+//	ENVMGR_PINNED         "1" when the session chose its profile (use, TUI) and
+//	                      ignores the machine-wide selection (see internal/selected)
 package shell
 
 import (

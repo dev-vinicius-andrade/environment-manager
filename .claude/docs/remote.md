@@ -1,103 +1,159 @@
-# Remote control (v1): `envmgr serve` and `envmgr remote`
+# Remote control: parent (hub) and children
 
-First version of goal 2 in `goals.md`: one machine (A, the controller) manages the **profiles** of another machine (B, the agent). Scope is deliberately narrow: list/get/put/delete profiles and set/unset single variables. There is **no remote command execution and no shell access**, and nothing in the API can activate a profile in a shell on B.
+Goal 2 in `goals.md`, as decided by the owner: one machine, the **parent**, controls the **profiles** of other machines, the **children**.
 
-Code: `internal/remote/` (server, client, identity, remotes file), `commands/envmgr/serve/`, `commands/envmgr/remote/`. Standard library only.
+- **The child dials the parent** (hub model). Children open no port, so this works behind NAT. Only the parent listens.
+- **A child joins with a single-use, expiring join code** that the parent prints.
+
+Scope is deliberately narrow. The only operations are: list, get, put and delete a profile (variables and hosts entries), and set or unset one variable. With an explicit, off-by-default grant (`invite --allow-hosts`), a parent may also list and edit the envmgr block of the child's own hosts file and apply a child profile's hosts entries (`hosts.*` operations; see `hosts.md`). There is **no remote command execution, no shell and no arbitrary paths**.
+
+Code:
+- `internal/remote/`: identity, hub state, hub, admin API, child agent, operations.
+- `commands/envmgr/parent/` (`envmgr parent ...`).
+- `commands/envmgr/join/` (`envmgr join`).
+- `commands/envmgr/agent/` (`envmgr agent ...`).
+
+Standard library only. This model replaced the earlier `serve`/`remote add` shared-token design completely; there is no legacy path.
+
+## Who can control whom
+
+- A child is bound to **exactly one parent**: the one whose code it used. `join` refuses a second parent unless you pass `--force`, which replaces the binding and tells the old parent best-effort.
+- A child takes instructions only from responses on its **own outbound, authenticated TLS connection** to the **pinned** parent certificate. Nothing else can reach it.
+- On the parent, only the **local admin** can drive children:
+  - every `envmgr parent ...` command reads the state files, or talks to the hub's loopback admin API with a per-start admin token;
+  - nothing on the network can create invites, list agents or relay operations.
+- Each invite grants a role, and the stricter rule always wins:
+  - `rw`: read and write.
+  - `ro` (`invite --read-only`): read only. The hub refuses mutations for `ro` children, and the child refuses them again on its side.
+- Capabilities are extra grants on top of the role. The only one is `hosts` (`invite --allow-hosts`): it allows `hosts.*` operations (reads for `ro`, edits only for `rw`). Hub and child both enforce it. It is stored in `agents.json` and `parent.json` like the role, and changes only by revoking and re-inviting.
+
+## Lifecycle
+
+1. **Parent** runs `envmgr parent serve` (foreground).
+   - First run creates a self-signed ECDSA P-256 certificate in `<ENVMGR_HOME>/parent/`.
+   - Every start prints the SHA-256 fingerprint.
+   - It binds `127.0.0.1:7777` by default. Any other `--addr` prints a warning.
+2. **Parent** runs `envmgr parent invite [--name laptop] [--expires 15m] [--read-only] [--allow-hosts] [--addr-public host:port]`.
+   - It creates a 32-byte random secret and stores only its SHA-256, with expiry, name, role and capabilities.
+   - It prints `envmgr join <code>`.
+   - The code is `base64url(JSON{addr, fp, secret, name?, exp})`.
+   - `addr` defaults to the running hub's listen address. Pass `--addr-public` when children must use another address, such as a LAN IP, a DNS name or a port forward.
+3. **Child** runs `envmgr join <code> [--name n]`.
+   - It pins `fp` and refuses any other certificate.
+   - It POSTs `/v1/enroll {secret, name}`.
+   - The hub consumes the invite atomically under a lock, so it is single use. Expired, used, cancelled or unknown codes all get a bare 401.
+   - The hub returns a long-lived per-child credential (32 random bytes; the hub stores only its hash).
+   - The child saves `<ENVMGR_HOME>/agent/parent.json` (0600) and starts the loop. Use `--no-run` to only enroll.
+   - If the parent fixed `--name`, the child cannot change it. Otherwise the child's `--name` is used, or a generated `agent-xxxxxx`.
+4. **Loop** (`envmgr agent run`, or the tail of `join`):
+   - It pings, then long-polls `GET /v1/agent/poll` (held about 25 s).
+   - It runs only allow-listed operations, validating every name, and POSTs `/v1/agent/result/{id}`.
+   - Network errors reconnect with capped exponential backoff (1 s up to 60 s).
+   - A 401 means revoked: the loop stops and tells the user.
+   - Ctrl+C stops cleanly.
+5. **Parent operations** go through the hub, which relays them to the child and waits about 15 s for its answer:
+
+   ```text
+   parent profiles|show|push|pull|set|unset|delete <agent> ...
+   parent hosts <agent> list|add|remove|group ...    # needs the hosts grant
+   parent hosts <agent> apply-profile <p> | unapply [--dry-run]   # grant + rw
+   ```
+
+   - Profiles carry their hosts entries (`profiles.md`): `push`/`pull`/`get`/`put` include them (the `Profile` JSON and `JobArgs.hosts`), `parent show` prints both sections (variables masked). Editing a child's profile hosts entries is a profile edit and needs no grant. Version note: a child older than this field ignores `hosts` in a `put` and stores none; an older parent's `push` sends none.
+   - Applying a profile's hosts on a child is `parent hosts <agent> apply-profile <p>`: the child applies its **own** profile `<p>` (push yours first), only the name travels. There is no `parent apply` for the environment: a parent cannot change the child's shells.
+
+   - An offline child fails at once ("agent is offline").
+6. **Revoke** with `envmgr parent revoke <agent>`.
+   - It removes the child from `agents.json`.
+   - A running hub notices within 2 s, even during an open long-poll, and the child's next request gets 401.
+   - The child side can also run `envmgr agent leave`, which deletes the local binding and tells the parent.
+7. **Re-invite / rotate**: revoke, then issue a new invite. The child joins again with `--force` if it still has the old binding.
+
+`envmgr parent invites` lists pending invites (name, role, caps, created, expires; never secrets). `envmgr parent cancel <invite-name>` withdraws one. `envmgr parent agents` shows name, role, caps, enrolled-at, last-seen and online; when the hub is down everything shows offline. `envmgr agent status` shows the parent, role, caps, fingerprint and whether the parent still accepts this child.
+
+Exact commands for two machines are in `.claude/instructions/connect-a-child.md`.
 
 ## Files
 
-All under `<ENVMGR_HOME>/remote/` (`ENVMGR_HOME` defaults to `<user config dir>/envmgr`, see `internal/profile`):
-
-| File | Machine | Content | Mode |
+| Machine | File | Content | Notes |
 | --- | --- | --- | --- |
-| `server.crt` | B | self-signed ECDSA P-256 cert, 10 years, SAN localhost/127.0.0.1/::1/hostname | 0600 |
-| `server.key` | B | PKCS#8 private key | 0600 |
-| `token` | B | 32 random bytes (crypto/rand), hex, plain text so `--show-token` can re-print it | 0600 |
-| `remotes.json` | A | paired remotes: address, token, pinned fingerprint | 0600 |
+| parent | `parent/server.crt`, `server.key` | hub TLS identity | key 0600. Deleting both changes the fingerprint and every child must re-join. |
+| parent | `parent/invites.json` | pending invites: name, role, caps, secret **hash**, expiry | 0600 |
+| parent | `parent/agents.json` | children: name, role, caps, credential **hash**, enrolled-at | 0600 |
+| parent | `parent/agents-seen.json` | last-seen per child | 0600, written only by the hub |
+| parent | `parent/admin.json` | loopback admin address, **admin token**, fingerprint, public address, pid | 0600. New token on every start, removed on clean shutdown. |
+| parent | `parent/state.lock` | cross-process lock for state changes | transient |
+| child | `agent/parent.json` | parent address, pinned fingerprint, **this child's credential**, name, role, caps | 0600 |
 
-Files are created on first use and reused afterwards. If only one of cert/key exists, `serve` refuses to start rather than regenerating silently (regeneration changes the fingerprint and breaks every pairing). On Windows the 0600 mode is not enforced; protection relies on the ACLs of the user profile directory.
+All writes are atomic (temp file plus rename). Both the hub and the CLI re-read the state on every use, so `invite`, `cancel` and `revoke` take effect on a running hub without a restart. Raw invite secrets and child credentials are never stored on the parent; a test reads every parent file to check this. The admin token in `admin.json` and the child's own credential in `parent.json` are the only stored bearer secrets, by necessity. On Windows the 0600 mode is not enforced, so protection relies on the user-profile ACLs.
 
-Rotation: stop `serve`, delete `token` (new token) and/or both `server.crt` + `server.key` (new fingerprint), start `serve` again, re-pair with `remote add <name> ... --force`.
+## API
 
-## Pairing flow (two machines)
+Public listener (TLS 1.3, `--addr`):
 
-On machine B (agent), for example `10.0.0.5`:
-
-```sh
-envmgr serve                              # loopback only: 127.0.0.1:7777
-envmgr serve --addr 10.0.0.5:7777         # reachable from the LAN (prints a warning)
-envmgr serve --addr 10.0.0.5:7777 --read-only   # A can read but every mutation gets 403
-```
-
-The first run prints the certificate fingerprint and the token once, plus a ready-made pairing line. Later runs print only the fingerprint; re-print both with:
-
-```sh
-envmgr serve --show-token
-```
-
-Move token and fingerprint to A over a channel you trust (in person, password manager, existing SSH session). On machine A (controller):
-
-```sh
-envmgr remote add b 10.0.0.5:7777 --token <TOKEN> --fingerprint <FINGERPRINT>
-# or keep the token out of shell history:
-envmgr remote add b 10.0.0.5:7777 --token-stdin --fingerprint <FINGERPRINT> < token.txt
-
-envmgr remote list                        # name, address, pinned fingerprint (never the token)
-envmgr remote profiles b                  # profile names on B
-envmgr remote show b dev                  # KEY=******** (values masked)
-envmgr remote show b dev --reveal         # clear-text values
-envmgr remote push b dev                  # local dev -> B, overwrites B's dev
-envmgr remote pull b dev [--force]        # B's dev -> local store; refuses to overwrite without --force
-envmgr remote set b dev MY_API_URL https://api.dev.example
-envmgr remote unset b dev MY_API_URL
-envmgr remote delete b dev
-envmgr remote remove b                    # forget the pairing (deletes the saved token)
-```
-
-To reach a loopback-only agent from another machine without exposing a port, tunnel it: `ssh -L 7777:127.0.0.1:7777 userB@10.0.0.5`, then `envmgr remote add b 127.0.0.1:7777 ...` on A.
-
-Data goes to stdout and status messages to stderr. `set` takes the value as an argument, so it lands in shell history; prefer `push` of a local profile for secrets.
-
-## API (JSON over HTTPS, TLS 1.3)
-
-Every request needs `Authorization: Bearer <token>`.
-
-| Method | Path | Body | Success |
+| Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| GET | `/v1/profiles` | | 200 `{"profiles":["dev",...]}` |
-| GET | `/v1/profiles/{name}` | | 200 `{"name":"dev","vars":{...}}` |
-| PUT | `/v1/profiles/{name}` | `{"vars":{...}}` (`name` optional, must match path) | 204, overwrites |
-| DELETE | `/v1/profiles/{name}` | | 204 |
-| PUT | `/v1/profiles/{name}/vars/{var}` | `{"value":"..."}` | 204, creates profile if missing |
-| DELETE | `/v1/profiles/{name}/vars/{var}` | | 204 |
+| POST | `/v1/enroll` | invite secret in body | `{secret, name?}` returns `{name, role, caps?, credential, parent}`. 401 bare / 409 name in use / 429 lockout. |
+| GET | `/v1/agent/poll` | Bearer credential | 200 `{id, op, args}`, or 204 after the hold time. 401 once revoked. |
+| POST | `/v1/agent/result/{id}` | Bearer credential | `{ok, error?, code?, notFound?, profiles?, profile?, hosts?}`. 404 if the job is not this child's. |
+| GET | `/v1/agent/ping` | Bearer credential | `{name, role, caps?, parent}` |
+| POST | `/v1/agent/leave` | Bearer credential | removes this child |
 
-Errors are `{"error":"..."}`: 400 invalid name/variable/JSON (unknown fields rejected), 401 `{"error":"unauthorized"}` with no detail, 403 read-only server, 404 profile not found or unknown path, 413 body over 1 MiB, 429 auth lockout (with `Retry-After`), 500 `internal error` (detail only in the server log).
+Operations (`op`): `list`, `get`, `put`, `delete`, `set`, `unset`. `args` holds `profile`, `var`, `value`, `vars` and `hosts` (the hosts entries of a `put`). With the `hosts` grant: `hosts.list`, `hosts.add`, `hosts.remove`, `hosts.group`, `hosts.apply-profile`, `hosts.unapply`, with `ip`, `hostnames`, `group`, `enable` and `dryRun` (no path; `hosts.apply-profile` takes only `profile` and `dryRun`; see `hosts.md`).
+
+Admin listener (TLS on `127.0.0.1:<random>`; the peer must be loopback; Bearer admin token from `admin.json`):
+- `GET /admin/v1/agents`
+- `POST /admin/v1/relay {agent, job}`. Errors: 404 unknown agent, 409 offline, 403 read-only or hosts not granted, 504 child timeout.
+
+The admin API is not served on the public listener.
 
 ## Threat model and controls
 
-Assets: profile values (API keys, tokens), the bearer token, the server private key.
-
 | Threat | Control |
 | --- | --- |
-| Network eavesdropping | TLS 1.3 always on, no plain-HTTP listener. |
-| Man in the middle / rogue server | Client pins the SHA-256 of the server leaf certificate (`InsecureSkipVerify` + `VerifyPeerCertificate` constant-time compare). No fingerprint, no connection; system CAs are never trusted. Mismatch error: possible MITM or regenerated identity. Client ignores proxies and does not follow redirects. |
-| Unauthorized client | 256-bit random bearer token; server keeps only its SHA-256 and compares with `subtle.ConstantTimeCompare`. Auth runs before routing, read-only checks and body reads, so unknown paths also return 401. |
-| Token brute force | Per source IP: after 5 consecutive failures the IP is locked out 1s, doubling per further failure up to 5 min (429, applies even to the right token during lockout); success resets. Table bounded at 10k entries. |
-| Path traversal / injection | Profile names checked with `profile.ValidName`, variables with `profile.ValidVar`, on client and server (path values are unescaped before checking, so `..%2F` is rejected). |
-| Resource exhaustion | 1 MiB request body limit, 64 KiB headers, ReadHeader 10s / Read 30s / Write 30s / Idle 60s timeouts, client response limit 8 MiB. |
-| Accidental exposure | Loopback bind by default; any other address must be passed explicitly and prints a warning. `--read-only` rejects every non-GET with 403. |
-| Remote code execution | No endpoint executes anything; operations map 1:1 to `profile.Store` calls. |
-| Secret leakage in logs/output | Server logs method, path, profile/variable names, source IP; never values or the token. `remote show` masks values (fixed `********`, length not revealed) unless `--reveal`; `remote list` never prints tokens. |
-| Concurrent writes | Server serializes store mutations with a mutex. |
+| Eavesdropping | TLS 1.3 on both listeners; no plain HTTP. |
+| Rogue or MITM parent | The child pins the SHA-256 of the parent's leaf certificate from the join code (`InsecureSkipVerify` plus a constant-time `VerifyPeerCertificate`). It never uses system CAs, ignores proxies and does not follow redirects. A mismatch stops the loop for good. |
+| Stolen or guessed join code | 256-bit secret, single use (consumed under a lock), expires (default 15 min), cancellable. Expired, used and unknown codes are indistinguishable (401, no detail). Treat a code like a password until it is used. |
+| Enrollment or credential brute force | Per-IP lockout after 5 consecutive failures: 1 s, doubling up to 5 min (429), also against valid secrets during the lockout. The table is bounded. |
+| Stolen child credential | Revoke on the parent; it takes effect within 2 s on a running hub. Credentials are per child, so one leak does not affect the others. |
+| One child acting on another | Jobs are bound to the agent name. A child can only fetch its own queue and answer its own job ids (404 otherwise). |
+| Network clients driving children | No network endpoint creates invites or relays operations. The admin API listens on loopback only, checks the peer address and needs a per-start random token. |
+| Path traversal / injection | `profile.ValidName` / `ValidVar` checked at the CLI, at the hub before relaying, and again on the child before executing. Unknown operations are rejected. |
+| Remote code execution | The child maps each allowed operation 1:1 to `profile.Store` (or, with the hosts grant, to `internal/hosts` on its own hosts file). There is no exec, shell or file path in the protocol. |
+| DNS hijack through hosts edits | Separate `hosts` grant, off by default, visible on both sides, revocable; managed block only; critical names refused; child-side audit log and backups. Details in `hosts.md`. |
+| Resource exhaustion | 1 MiB request body limit, 64 KiB headers, server timeouts (ReadHeader 10 s, Read 30 s, Write 45 s, Idle 90 s), client response limit 8 MiB, per-child job queue of 8. |
+| Secret leakage | Logs carry agent name, operation and profile name, never values, secrets or tokens. Failed auth logs only IP and path. `parent show` masks values (`********`, length hidden) unless `--reveal`. Listings never print secrets. |
 
-Residual risks / limits:
+## Limits
 
-- Anyone with the token and network reach controls B's profiles; anyone reading A's `remotes.json` or B's `token` file gets that power. Protect both home directories.
-- No per-client identities or revocation list: one token per agent; rotate by deleting the `token` file.
-- No audit log beyond stderr lines; no TLS client certificates (mTLS); no NAT traversal (same network or an SSH tunnel).
-- Lockout is per IP, so many source IPs can still try tokens in parallel (impractical against a 256-bit token, but it can fill logs).
-- `serve` runs in the foreground; no service/daemon install yet.
+- `parent serve`, `agent run` and `join` run in the foreground; there is no service or daemon installation yet.
+- One parent per child. A parent has many children, but there is no fan-out command; run one command per agent.
+- Last-seen is recorded at most once a minute per child. "Online" means a poll is open, or one ended less than 10 s ago.
+- A parent whose identity is regenerated, or whose address changes, needs every child to re-join.
+- `parent set` takes the value as an argument, so it lands in shell history. Prefer `parent push` of a local profile for secrets.
+- The lock file is treated as stale after 30 s; a crashed CLI can block state changes until then.
 
 ## Tests
 
-`go test ./internal/remote/ ./commands/envmgr/remote/ ./commands/envmgr/serve/`: real TLS listener on `127.0.0.1:0` with separate temp homes for A and B; push/pull/list/show/set/unset/delete roundtrip, wrong/missing token 401, wrong fingerprint refused, traversal names 400, oversized body 413, read-only 403, auth lockout 429, masked output, identity reuse, remotes file validation.
+The test command:
+
+```sh
+go test ./internal/remote/ ./commands/envmgr/parent/ ./commands/envmgr/join/
+```
+
+The tests use a real TLS hub on `127.0.0.1:0` with separate temporary homes for the parent and two children. They cover:
+
+- full relay of every operation, and two children isolated from each other;
+- read-only enforced at the hub and at the child;
+- single-use, expired and cancelled invites;
+- wrong fingerprint refused, both at join and in the loop;
+- the one-parent binding and `--force`;
+- revoke stopping the loop, including during an open long-poll;
+- fast offline errors;
+- the admin API's token, loopback and not-public checks;
+- no raw secrets in any parent file, plus file modes;
+- traversal names, body limit, rate limit and lockout;
+- masked output;
+- the CLI end to end: `parent` invite/invites/cancel/agents/push/pull/show/set/unset/delete/revoke, and `join`, `agent status` and `agent leave`;
+- the hosts grant (`hosts_remote_test.go`, `parent/hosts_test.go`): refused without it at hub and child, full flow with it, `ro` plus grant, network paths ignored, revoke;
+- profile hosts (`profile_hosts_remote_test.go`, `parent/hosts_test.go`): hosts survive push/pull, `apply-profile` refused without the grant, for `ro` and for an unknown profile, network-supplied hosts data refused/unused, critical names, the child's audit line, `unapply`.

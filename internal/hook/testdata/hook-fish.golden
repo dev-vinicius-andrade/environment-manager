@@ -1,0 +1,21 @@
+# envmgr hook (fish): follow the machine-wide profile selection (envmgr select / tray).
+set -g __envmgr_exe '/opt/env mgr/envmgr'
+set -g __envmgr_default_sel '/home/u/.config/envmgr/selected.json'
+function __envmgr_hook --on-event fish_prompt
+    if set -q ENVMGR_PINNED; and test -n "$ENVMGR_PINNED"; and test "$ENVMGR_PINNED" != 0
+        return
+    end
+    set -l f $__envmgr_default_sel
+    if set -q ENVMGR_HOME; and test -n "$ENVMGR_HOME"
+        set f "$ENVMGR_HOME/selected.json"
+    end
+    set -l cur ""
+    if test -f "$f"
+        read -z cur < "$f" 2>/dev/null
+    end
+    set cur "$f|$cur"
+    if not set -q __envmgr_last; or test "$cur" != "$__envmgr_last"
+        set -g __envmgr_last $cur
+        $__envmgr_exe sync --shell fish | source
+    end
+end

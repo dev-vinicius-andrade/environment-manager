@@ -51,11 +51,11 @@ func TestUseEmitsCodeOnStdoutOnly(t *testing.T) {
 	}
 	t.Setenv("MY_URL", "orig")
 	want := map[string]string{
-		"bash":       "export ENVMGR_PREV_MY_URL='orig'\nexport MY_URL='http://x/'\\''y'\\'''\nexport ENVMGR_PROFILE='dev'\nexport ENVMGR_VARS='MY_URL'\n",
-		"zsh":        "export ENVMGR_PREV_MY_URL='orig'\nexport MY_URL='http://x/'\\''y'\\'''\nexport ENVMGR_PROFILE='dev'\nexport ENVMGR_VARS='MY_URL'\n",
-		"fish":       "set -gx ENVMGR_PREV_MY_URL 'orig'\nset -gx MY_URL 'http://x/\\'y\\''\nset -gx ENVMGR_PROFILE 'dev'\nset -gx ENVMGR_VARS 'MY_URL'\n",
-		"powershell": "$env:ENVMGR_PREV_MY_URL = 'orig'\n$env:MY_URL = 'http://x/''y'''\n$env:ENVMGR_PROFILE = 'dev'\n$env:ENVMGR_VARS = 'MY_URL'\n",
-		"cmd":        "@set ENVMGR_PREV_MY_URL=orig\n@set MY_URL=http://x/'y'\n@set ENVMGR_PROFILE=dev\n@set ENVMGR_VARS=MY_URL\n",
+		"bash":       "export ENVMGR_PREV_MY_URL='orig'\nexport MY_URL='http://x/'\\''y'\\'''\nexport ENVMGR_PROFILE='dev'\nexport ENVMGR_VARS='MY_URL'\nexport ENVMGR_PINNED='1'\n",
+		"zsh":        "export ENVMGR_PREV_MY_URL='orig'\nexport MY_URL='http://x/'\\''y'\\'''\nexport ENVMGR_PROFILE='dev'\nexport ENVMGR_VARS='MY_URL'\nexport ENVMGR_PINNED='1'\n",
+		"fish":       "set -gx ENVMGR_PREV_MY_URL 'orig'\nset -gx MY_URL 'http://x/\\'y\\''\nset -gx ENVMGR_PROFILE 'dev'\nset -gx ENVMGR_VARS 'MY_URL'\nset -gx ENVMGR_PINNED '1'\n",
+		"powershell": "$env:ENVMGR_PREV_MY_URL = 'orig'\n$env:MY_URL = 'http://x/''y'''\n$env:ENVMGR_PROFILE = 'dev'\n$env:ENVMGR_VARS = 'MY_URL'\n$env:ENVMGR_PINNED = '1'\n",
+		"cmd":        "@set ENVMGR_PREV_MY_URL=orig\n@set MY_URL=http://x/'y'\n@set ENVMGR_PROFILE=dev\n@set ENVMGR_VARS=MY_URL\n@set ENVMGR_PINNED=1\n",
 	}
 	for sh, w := range want {
 		out, errOut, err := execute("use", "dev", "--shell", sh)
